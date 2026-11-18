@@ -30,7 +30,7 @@ export default function App() {
           {state.kind === "ok" && (
             <span>
               API is <strong>{state.health.status}</strong> · engine v
-              {state.health.engine_version} · {state.health.env}
+              {state.health.engine_version} · {state.health.app_env}
             </span>
           )}
           {state.kind === "error" && (
