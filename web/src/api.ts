@@ -1,10 +1,11 @@
 export type Health = {
   status: string;
-  env: string;
+  app_env: string;
   engine_version: string;
 };
 
-const API_URL = import.meta.env.VITE_API_URL ?? "";
+// Empty in local dev, so requests go through the Vite proxy. Set on Vercel per environment.
+const API_URL = (import.meta.env.VITE_API_URL ?? "").replace(/\/+$/, "");
 
 export async function fetchHealth(signal?: AbortSignal): Promise<Health> {
   const res = await fetch(`${API_URL}/health`, { signal });
