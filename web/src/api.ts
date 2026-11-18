@@ -4,11 +4,12 @@ export type Health = {
   engine_version: string;
 };
 
-// Empty in local dev, so requests go through the Vite proxy. Set on Vercel per environment.
-const API_URL = (import.meta.env.VITE_API_URL ?? "").replace(/\/+$/, "");
+// Always a same-origin, relative path. On Vercel, /api/* is routed to the Python
+// service; locally, the Vite dev server proxies /api to uvicorn.
+export const API_BASE = "/api";
 
 export async function fetchHealth(signal?: AbortSignal): Promise<Health> {
-  const res = await fetch(`${API_URL}/health`, { signal });
+  const res = await fetch(`${API_BASE}/health`, { signal });
   if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
   return (await res.json()) as Health;
 }
