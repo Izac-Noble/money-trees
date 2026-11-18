@@ -14,7 +14,7 @@ describe("App", () => {
     );
     render(<App />);
     expect(await screen.findByText("ok")).toBeInTheDocument();
-    expect(fetch).toHaveBeenCalledWith("/health", expect.anything());
+    expect(fetch).toHaveBeenCalledWith("/api/health", expect.anything());
   });
 
   it("shows an error when the API is down", async () => {

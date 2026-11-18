@@ -21,3 +21,6 @@ web/dist/
 .DS_Store
 .vscode/
 .idea/
+
+# Vercel
+.vercel/

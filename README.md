@@ -5,12 +5,12 @@ Helps young adults and first-time homeowners compare money decisions (pay down t
 | Package | What it is |
 | --- | --- |
 | `engine/` | Pure-Python calculation engine (`money_trees_engine`) |
-| `api/` | FastAPI app that serves the engine over HTTP |
+| `api/` | FastAPI app that serves the engine over HTTP at `/api/*` |
 | `web/` | React + TypeScript + Vite + Tailwind front end |
 
 ## Local setup
 
-Requires Python 3.11+ (deploys use the version in `.python-version`) and Node 20 (`nvm use`).
+Requires Python 3.11+ (Vercel and CI use 3.12, from `api/.python-version`) and Node 24 (`nvm use`).
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -28,70 +28,65 @@ uvicorn money_trees_api.main:app --reload
 cd web && npm run dev
 ```
 
-Open http://localhost:5173. The page calls `/health` through the Vite proxy.
+Open http://localhost:5173. The page calls `/api/health`, and the Vite dev server proxies `/api/*`
+to uvicorn on port 8000, so the browser uses the same relative paths locally as on Vercel.
 
 ## Checks (same as CI)
 
 ```bash
 cd engine && ruff check . && ruff format --check . && mypy src tests && pytest
-cd api && ruff check . && ruff format --check . && mypy src tests && pytest
+cd api && uv lock --check && ruff check . && ruff format --check . && mypy src tests index.py && pytest
 cd web && npm run lint && npm run typecheck && npm test && npm run build
 ```
 
 ## Deploying
 
-| Part | Host | Branch → environment |
-| --- | --- | --- |
-| API | Render (Python web service) | `staging` → staging service, `main` → production service |
-| Web | Vercel | `staging` and PRs → Preview, `main` → Production |
+Everything deploys as **one Vercel project** using
+[Vercel Services](https://vercel.com/docs/services), configured in
+[`vercel.json`](vercel.json):
 
-Real URLs and secrets live only in the Render and Vercel dashboards. Never commit them.
+| Service | Root | Serves | How |
+| --- | --- | --- | --- |
+| `web` | `web/` | every path except `/api/*` | Vite static build |
+| `api` | `api/` | `/api/*` | FastAPI as one Python Vercel Function (entrypoint `api/index.py`) |
 
-### API on Render
+The web app and the API share one domain, so the browser calls the API with
+relative `/api/...` paths. There is no API URL to configure and no CORS. Vercel
+passes the full path (for example `/api/health`) to FastAPI, which is why every
+route is declared under the `/api` prefix.
 
-Create one web service per environment with these settings:
+| Git branch | Vercel environment |
+| --- | --- |
+| `main` | Production |
+| `staging` and PR branches | Preview |
 
-- **Runtime:** Python 3
-- **Root Directory:** leave empty (repo root), so the build can see `engine/`
-- **Python version:** pinned by [`.python-version`](.python-version) (`3.12.16`)
-- **Build Command:**
+### Vercel project settings
 
-  ```bash
-  pip install --upgrade pip && pip install ./engine ./api
-  ```
+- **Root Directory:** leave empty (repo root), where `vercel.json` lives.
+- **Framework Preset / Build Command / Output Directory:** leave on defaults.
+  Each service's build is set in `vercel.json`.
+- **Node.js version:** pinned to `24.x` by `engines.node` in
+  [`web/package.json`](web/package.json). Vercel no longer supports Node 20.
+- **Python version:** `3.12`, from [`api/.python-version`](api/.python-version).
 
-- **Start Command:**
+### How the engine gets into the API function
 
-  ```bash
-  uvicorn money_trees_api.main:app --host 0.0.0.0 --port $PORT
-  ```
-
-- **Health Check Path:** `/health`
-
-The build installs the local engine package first, then the API that depends on it.
-If `ALLOWED_ORIGINS` contains `*` or a value without `http://` / `https://`, the
-service fails to start on purpose.
-
-### Web on Vercel
-
-- **Root Directory:** `web`
-- **Framework Preset:** Vite (build `npm run build`, output `dist`)
-- **Node version:** pinned by `engines.node` (`20.x`) in [`web/package.json`](web/package.json)
-
-Every build that isn't production gets `<meta name="robots" content="noindex, nofollow">`.
-Only a build with `APP_ENV=production` is indexable.
+`api/pyproject.toml` depends on `money-trees-engine`, and
+`[tool.uv.sources]` points that dependency at `../engine`. Vercel installs the
+API service with uv from [`api/uv.lock`](api/uv.lock), so the engine is built
+from the repo and bundled into the function like any other package. After
+changing dependencies in `api/` or `engine/`, run `uv lock` in `api/` and commit
+`uv.lock`. CI fails if it's out of date.
 
 ### Environment variables
 
-| Variable | Purpose | Where it's set | Staging value | Production value |
-| --- | --- | --- | --- | --- |
-| `APP_ENV` (API) | Names the environment. Returned by `GET /health`. Defaults to `development`. | Render, each service | `staging` | `production` |
-| `ALLOWED_ORIGINS` | Comma-separated browser origins allowed by CORS. `*` is rejected. Unset means `http://localhost:5173` only. | Render, each service | the staging/preview web URL(s) | the production web URL |
-| `PORT` | Port uvicorn listens on. | Render sets it automatically. Don't set it yourself. | — | — |
-| `VITE_API_URL` | Base URL the browser calls for the API. Baked in at build time. | Vercel → Preview / Production | staging API URL | production API URL |
-| `APP_ENV` (web) | Build-time switch: anything but `production` adds the noindex tag. | Vercel → Preview / Production | `staging` | `production` |
-| `VITE_API_PROXY_TARGET` | Where `npm run dev` proxies `/health`. | Local only (`.env.example`) | — | — |
+Set these in **Vercel → Project → Settings → Environment Variables**. One
+project serves both web and API, so each variable is shared by both services.
 
-Note that Vercel preview deployments each get their own URL. If you open a
-per-PR preview instead of the stable staging URL, its origin must be in the
-staging API's `ALLOWED_ORIGINS` or the browser will block the call.
+| Variable | Purpose | Preview (staging + PRs) | Production |
+| --- | --- | --- | --- |
+| `APP_ENV` | Names the environment. The API returns it from `GET /api/health`. The web build adds a noindex robots tag unless it is exactly `production`. Defaults to `development` when unset. | `staging` | `production` |
+| `API_PROXY_TARGET` | Local dev only: where `npm run dev` proxies `/api`. Defaults to `http://localhost:8000`. Not set on Vercel. | — | — |
+
+`VITE_API_URL` and `ALLOWED_ORIGINS` are no longer used. Delete them from any
+Vercel or Render settings where they were added.

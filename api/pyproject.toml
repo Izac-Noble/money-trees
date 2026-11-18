@@ -7,11 +7,15 @@ name = "money-trees-api"
 version = "0.1.0"
 description = "HTTP API for Money Trees."
 requires-python = ">=3.11"
-# money-trees-engine is installed from ../engine (pip install -e ../engine).
-dependencies = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "money-trees-engine"]
+# money-trees-engine comes from ../engine: uv (Vercel) reads [tool.uv.sources];
+# locally and in CI it's installed first with `pip install -e ../engine`.
+dependencies = ["fastapi>=0.115", "money-trees-engine"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6", "mypy>=1.11"]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6", "mypy>=1.11", "uvicorn[standard]>=0.30"]
+
+[tool.uv.sources]
+money-trees-engine = { path = "../engine" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
