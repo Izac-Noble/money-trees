@@ -53,7 +53,7 @@ Create one web service per environment with these settings:
 
 - **Runtime:** Python 3
 - **Root Directory:** leave empty (repo root), so the build can see `engine/`
-- **Python version:** pinned by [`.python-version`](.python-version) (`3.12.8`)
+- **Python version:** pinned by [`.python-version`](.python-version) (`3.12.16`)
 - **Build Command:**
 
   ```bash
