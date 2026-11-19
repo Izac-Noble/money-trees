@@ -58,6 +58,10 @@ path, status and duration are. Interactive docs are at `/api/docs`.
   to 2 decimal places, rates up to 6. Months and counts are integers.
 - Every money value in a response has exactly 2 decimal places (`"1199.10"`).
 - Every POST response includes `engine_version`.
+- Every loan and debt takes `payment_mode`: `"fixed_term"` (default) with `term_months`, or
+  `"fixed_payment"` with a `monthly_payment` string. Sending the wrong one is a 422. A payment
+  that doesn't cover the interest returns 422 with `min_interest`. Credit card results carry
+  `notes` the UI must show.
 - Errors are `{"errors": [{"field": "debts[1].annual_rate", "message": "..."}]}`, listing every
   invalid field: 400 for malformed JSON, 413 over 100 KB, 422 for invalid input, and a
   generic 500 with no details.

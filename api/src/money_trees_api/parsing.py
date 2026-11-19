@@ -14,20 +14,22 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
-from money_trees_engine.amortization import MAX_TERM_MONTHS, LumpSum
+from money_trees_engine.amortization import MAX_TERM_MONTHS, LumpSum, PaymentMode
 from money_trees_engine.debts import MAX_DEBTS, MAX_NAME_LENGTH, Debt, DebtCategory
 from money_trees_engine.strategies import Strategy
 
 _MONEY_RE = re.compile(r"^-?\d+(\.\d{1,2})?$")
 _RATE_RE = re.compile(r"^-?\d+(\.\d{1,6})?$")
 _ZERO = Decimal("0")
-_CATEGORY_LIST = "mortgage, auto, student, personal or other"
+_CATEGORY_LIST = ", ".join(c.value for c in DebtCategory)
 
 
 @dataclass(frozen=True)
 class FieldError:
     field: str | None
     message: str
+    # Extra keys for the error object, e.g. {"min_interest": "100.00"}.
+    details: tuple[tuple[str, str], ...] = ()
 
 
 class InvalidInput(Exception):
@@ -134,20 +136,59 @@ class _Reader:
 
 
 @dataclass(frozen=True)
+class LoanFields:
+    mode: PaymentMode | None
+    principal: Decimal | None
+    annual_rate: Decimal | None
+    term_months: int | None
+    monthly_payment: Decimal | None
+    extra_monthly: Decimal | None
+    lump_sums: tuple[LumpSum, ...] | None
+
+    def complete(self) -> bool:
+        if None in (self.mode, self.principal, self.annual_rate, self.extra_monthly):
+            return False
+        if self.lump_sums is None:
+            return False
+        if self.mode is PaymentMode.FIXED_TERM:
+            return self.term_months is not None
+        return self.monthly_payment is not None
+
+
+@dataclass(frozen=True)
 class LoanInput:
+    payment_mode: PaymentMode
     principal: Decimal
     annual_rate: Decimal
-    term_months: int
+    term_months: int | None
+    monthly_payment: Decimal | None
     extra_monthly: Decimal
     lump_sums: tuple[LumpSum, ...]
+    category: DebtCategory | None
 
 
-_LOAN_FIELDS = {"principal", "annual_rate", "term_months", "extra_monthly", "lump_sums"}
+_LOAN_FIELDS = {
+    "payment_mode",
+    "principal",
+    "annual_rate",
+    "term_months",
+    "monthly_payment",
+    "extra_monthly",
+    "lump_sums",
+}
 
 
-def _loan_fields(
-    r: _Reader, data: dict[str, object], path: str
-) -> tuple[Decimal | None, Decimal | None, int | None, Decimal | None, tuple[LumpSum, ...] | None]:
+def _loan_fields(r: _Reader, data: dict[str, object], path: str) -> LoanFields:
+    mode: PaymentMode | None = PaymentMode.FIXED_TERM
+    if "payment_mode" in data:
+        raw_mode = data["payment_mode"]
+        try:
+            mode = PaymentMode(raw_mode) if isinstance(raw_mode, str) else None
+        except ValueError:
+            mode = None
+        if mode is None:
+            r.fail(_join(path, "payment_mode"), "Choose fixed_term or fixed_payment.")
+
     principal = r.decimal(data, "principal", path, kind="money")
     if principal is not None and principal <= 0:
         r.fail(_join(path, "principal"), "Balance must be greater than 0.")
@@ -161,19 +202,38 @@ def _loan_fields(
         r.fail(_join(path, "annual_rate"), "Rate must be below 1 (100%).")
         rate = None
 
-    term = r.integer(data, "term_months", path)
-    if term is not None and not 1 <= term <= MAX_TERM_MONTHS:
-        r.fail(
-            _join(path, "term_months"),
-            f"Term must be between 1 and {MAX_TERM_MONTHS} months.",
-        )
-        term = None
+    term: int | None = None
+    payment: Decimal | None = None
+    if mode is PaymentMode.FIXED_TERM:
+        if "monthly_payment" in data:
+            r.fail(
+                _join(path, "monthly_payment"),
+                "Only send a monthly payment when payment_mode is fixed_payment.",
+            )
+        term = r.integer(data, "term_months", path)
+        if term is not None and not 1 <= term <= MAX_TERM_MONTHS:
+            r.fail(
+                _join(path, "term_months"),
+                f"Term must be between 1 and {MAX_TERM_MONTHS} months.",
+            )
+            term = None
+    elif mode is PaymentMode.FIXED_PAYMENT:
+        if "term_months" in data:
+            r.fail(
+                _join(path, "term_months"),
+                "Only send term_months when payment_mode is fixed_term.",
+            )
+        payment = r.decimal(data, "monthly_payment", path, kind="money")
+        if payment is not None and payment <= 0:
+            r.fail(_join(path, "monthly_payment"), "Monthly payment must be greater than 0.")
+            payment = None
 
     extra = r.decimal(data, "extra_monthly", path, kind="money", default="0")
     if extra is not None and extra < 0:
         r.fail(_join(path, "extra_monthly"), "Extra payment can't be negative.")
         extra = None
 
+    last_month = term if mode is PaymentMode.FIXED_TERM else MAX_TERM_MONTHS
     raw_lumps = r.array(data, "lump_sums", path)
     lumps: list[LumpSum] | None = None if raw_lumps is None else []
     for i, item in enumerate(raw_lumps or []):
@@ -187,10 +247,10 @@ def _loan_fields(
         if month is not None and month < 1:
             r.fail(_join(item_path, "month"), "Month must be 1 or later.")
             month = None
-        elif month is not None and term is not None and month > term:
+        elif month is not None and last_month is not None and month > last_month:
             r.fail(
                 _join(item_path, "month"),
-                f"Month must be within the term (1 to {term}).",
+                f"Month must be within the term (1 to {last_month}).",
             )
             month = None
         if amount is not None and amount <= 0:
@@ -200,21 +260,45 @@ def _loan_fields(
             lumps = None
         elif lumps is not None:
             lumps.append(LumpSum(month, amount))
-    return principal, rate, term, extra, None if lumps is None else tuple(lumps)
+    return LoanFields(
+        mode, principal, rate, term, payment, extra, None if lumps is None else tuple(lumps)
+    )
+
+
+def _category(r: _Reader, data: dict[str, object], path: str) -> DebtCategory | None:
+    category = r.string(data, "category", path)
+    if category is None:
+        return None
+    try:
+        return DebtCategory(category)
+    except ValueError:
+        r.fail(_join(path, "category"), f"Choose one of: {_CATEGORY_LIST}.")
+        return None
 
 
 def parse_amortization(body: object) -> LoanInput:
     errors: list[FieldError] = []
     r = _Reader(errors)
-    data = r.obj(body, "", _LOAN_FIELDS)
+    data = r.obj(body, "", _LOAN_FIELDS | {"category"})
     if data is None:
         raise InvalidInput(errors)
-    principal, rate, term, extra, lumps = _loan_fields(r, data, "")
-    if errors:
+    loan = _loan_fields(r, data, "")
+    # Optional: only used to attach the category's notes (credit cards).
+    category = _category(r, data, "") if "category" in data else None
+    if errors or not loan.complete():
         raise InvalidInput(errors)
-    assert principal is not None and rate is not None and term is not None
-    assert extra is not None and lumps is not None
-    return LoanInput(principal, rate, term, extra, lumps)
+    assert loan.mode is not None and loan.principal is not None and loan.annual_rate is not None
+    assert loan.extra_monthly is not None and loan.lump_sums is not None
+    return LoanInput(
+        loan.mode,
+        loan.principal,
+        loan.annual_rate,
+        loan.term_months,
+        loan.monthly_payment,
+        loan.extra_monthly,
+        loan.lump_sums,
+        category,
+    )
 
 
 _DEBT_FIELDS = {"id", "name", "category"} | _LOAN_FIELDS
@@ -239,7 +323,6 @@ def _parse_debt_list(
 
     debts: list[Debt] | None = []
     seen: set[str] = set()
-    categories = {c.value for c in DebtCategory}
     for i, item in enumerate(raw):
         path = f"debts[{i}]"
         before = len(r.errors)
@@ -260,34 +343,40 @@ def _parse_debt_list(
                 r.fail(f"{path}.name", "Enter a name for this debt.")
             elif len(name) > MAX_NAME_LENGTH:
                 r.fail(f"{path}.name", f"Name must be {MAX_NAME_LENGTH} characters or fewer.")
-        category = r.string(d, "category", path)
-        if category is not None and category not in categories:
-            if category == "credit_card":
-                r.fail(
-                    f"{path}.category",
-                    f"Credit cards aren't supported yet. Choose {_CATEGORY_LIST}.",
-                )
-            else:
-                r.fail(f"{path}.category", f"Choose {_CATEGORY_LIST}.")
-        principal, rate, term, extra, lumps = _loan_fields(r, d, path)
+        category = _category(r, d, path)
+        loan = _loan_fields(r, d, path)
         if shared_budget:
-            if extra is not None and extra != 0:
+            if loan.extra_monthly is not None and loan.extra_monthly != 0:
                 r.fail(
                     f"{path}.extra_monthly",
                     "Leave this at 0. Extra money comes from the shared monthly amount.",
                 )
-            if lumps:
+            if loan.lump_sums:
                 r.fail(
                     f"{path}.lump_sums",
                     "Leave this empty. Extra money comes from the shared monthly amount.",
                 )
-        if len(r.errors) > before or debts is None:
+        if len(r.errors) > before or debts is None or not loan.complete():
             debts = None
             continue
         assert debt_id is not None and name is not None and category is not None
-        assert principal is not None and rate is not None and term is not None
-        assert extra is not None and lumps is not None
-        debts.append(Debt(debt_id, name, category, principal, rate, term, extra, lumps))
+        assert loan.mode is not None and loan.principal is not None
+        assert loan.annual_rate is not None and loan.extra_monthly is not None
+        assert loan.lump_sums is not None
+        debts.append(
+            Debt(
+                debt_id,
+                name,
+                category,
+                loan.principal,
+                loan.annual_rate,
+                loan.term_months,
+                loan.extra_monthly,
+                loan.lump_sums,
+                payment_mode=loan.mode,
+                monthly_payment=loan.monthly_payment,
+            )
+        )
     return debts
 
 

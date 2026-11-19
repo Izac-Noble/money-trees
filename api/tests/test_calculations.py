@@ -229,12 +229,20 @@ def test_meta(client: TestClient) -> None:
     assert body["disclaimer"] == DISCLAIMER
     assert DISCLAIMER == "Estimates for learning and planning, not financial advice."
     assert body["categories"] == [
-        {"value": "mortgage", "suggested_term_months": 360},
-        {"value": "auto", "suggested_term_months": 60},
-        {"value": "student", "suggested_term_months": 120},
-        {"value": "personal", "suggested_term_months": 36},
-        {"value": "other", "suggested_term_months": None},
+        {"value": v, "label": label, "default_payment_mode": mode, "suggested_term_months": term}
+        for v, label, mode, term in [
+            ("mortgage", "Mortgage", "fixed_term", 360),
+            ("auto", "Car loan", "fixed_term", 60),
+            ("student", "Student loan", "fixed_term", 120),
+            ("personal", "Personal loan", "fixed_term", 36),
+            ("credit_card", "Credit card", "fixed_payment", None),
+            ("medical", "Medical debt", "fixed_payment", None),
+            ("family_friend", "Loan from family or friends", "fixed_payment", None),
+            ("tax", "Tax debt", "fixed_payment", None),
+            ("other", "Other", "fixed_payment", None),
+        ]
     ]
+    assert body["payment_modes"] == ["fixed_term", "fixed_payment"]
     assert body["engine_version"] == "0.1.0"
     assert body["limits"]["max_debts"] == 20
 
@@ -263,7 +271,7 @@ def test_reports_every_invalid_field(client: TestClient) -> None:
     debts = [dict(d) for d in THREE_DEBTS]
     debts[0]["name"] = " "
     debts[1]["annual_rate"] = "1.5"
-    debts[2]["category"] = "credit_card"
+    debts[2]["category"] = "car_loan"
     debts[2]["term_months"] = 0
     response = client.post("/api/debts", json={"debts": debts})
     assert response.status_code == 422

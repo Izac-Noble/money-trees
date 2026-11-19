@@ -47,16 +47,18 @@ def schedule_row(row: ScheduleRow) -> JSON:
 
 def _loan_assumptions(a: AmortizationAssumptions) -> JSON:
     return {
+        "payment_mode": a.payment_mode.value,
         "principal": money(a.principal),
         "annual_rate": rate(a.annual_rate),
         "monthly_rate": rate(a.monthly_rate),
         "term_months": a.term_months,
+        "monthly_payment": money_or_none(a.monthly_payment),
         "extra_monthly": money(a.extra_monthly),
         "lump_sums": [{"month": x.month, "amount": money(x.amount)} for x in a.lump_sums],
     }
 
 
-def amortization(result: AmortizationResult) -> JSON:
+def amortization(result: AmortizationResult, notes: tuple[str, ...] = ()) -> JSON:
     s = result.summary
     return {
         "summary": {
@@ -67,6 +69,7 @@ def amortization(result: AmortizationResult) -> JSON:
             "interest_saved": money_or_none(s.interest_saved),
             "months_saved": s.months_saved,
         },
+        "notes": list(notes),
         "schedule": [schedule_row(r) for r in result.schedule],
         "assumptions": _loan_assumptions(result.assumptions),
     }
@@ -76,7 +79,13 @@ def debts(result: DebtsResult) -> JSON:
     s = result.summary
     return {
         "debts": [
-            {"id": d.id, "name": d.name, "category": d.category.value, **amortization(d.result)}
+            {
+                "id": d.id,
+                "name": d.name,
+                "category": d.category.value,
+                "payment_mode": d.payment_mode.value,
+                **amortization(d.result, d.notes),
+            }
             for d in result.debts
         ],
         "summary": {
@@ -128,6 +137,7 @@ def strategy(result: StrategyResult) -> JSON:
                 "payoff_month": p.payoff_month,
                 "total_interest": money(p.total_interest),
                 "total_paid": money(p.total_paid),
+                "notes": list(p.notes),
                 "schedule": [schedule_row(r) for r in p.schedule],
             }
             for p in result.debts
