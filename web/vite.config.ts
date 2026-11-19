@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), tailwindcss(), robotsMeta(env.APP_ENV)],
     server: {
       proxy: {
-        "/api": env.API_PROXY_TARGET || "http://localhost:8000",
+        "/api": env.API_PROXY_TARGET || "http://127.0.0.1:8000",
       },
     },
     test: {
