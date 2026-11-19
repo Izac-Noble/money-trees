@@ -52,6 +52,42 @@ export type AmortizationRequest = {
   lump_sums?: { month: number; amount: string }[];
 };
 
+export type DebtRequest = {
+  id: string;
+  name: string;
+  category: string;
+  principal: string;
+  annual_rate: string;
+  term_months: number;
+};
+
+export type TimelineRow = {
+  month: number;
+  total_payment: string;
+  total_interest: string;
+  total_ending_balance: string;
+  active_debts: number;
+};
+
+export type DebtsResponse = {
+  engine_version: string;
+  debts: ({
+    id: string;
+    name: string;
+    category: string;
+  } & Omit<AmortizationResponse, "engine_version">)[];
+  summary: {
+    total_starting_balance: string;
+    total_regular_payment: string;
+    total_interest: string;
+    total_paid: string;
+    debt_free_month: number;
+    debt_count: number;
+  };
+  timeline: TimelineRow[];
+  by_category: Record<string, { starting_balance: string; total_interest: string }>;
+};
+
 export type FieldError = { field: string | null; message: string };
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; errors: FieldError[] };
@@ -106,4 +142,11 @@ export function postAmortization(
   signal?: AbortSignal,
 ): Promise<ApiResult<AmortizationResponse>> {
   return postJson<AmortizationResponse>("/amortization", body, signal);
+}
+
+export function postDebts(
+  debts: DebtRequest[],
+  signal?: AbortSignal,
+): Promise<ApiResult<DebtsResponse>> {
+  return postJson<DebtsResponse>("/debts", { debts }, signal);
 }
