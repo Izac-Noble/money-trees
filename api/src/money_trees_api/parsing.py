@@ -301,13 +301,15 @@ def parse_amortization(body: object) -> LoanInput:
     )
 
 
-_DEBT_FIELDS = {"id", "name", "category"} | _LOAN_FIELDS
+_DEBT_FIELDS = {"id", "name", "category", "owner"} | _LOAN_FIELDS
 
 
 def _parse_debt_list(
-    r: _Reader, data: dict[str, object], *, shared_budget: bool
+    r: _Reader, data: dict[str, object], *, shared_budget: bool, allow_empty: bool = False
 ) -> list[Debt] | None:
     if "debts" not in data:
+        if allow_empty:
+            return []
         r.fail("debts", "This field is required.")
         return None
     raw = data["debts"]
@@ -315,6 +317,8 @@ def _parse_debt_list(
         r.fail("debts", "Expected a list of debts.")
         return None
     if not raw:
+        if allow_empty:
+            return []
         r.fail("debts", "Add at least one debt.")
         return None
     if len(raw) > MAX_DEBTS:
@@ -344,6 +348,10 @@ def _parse_debt_list(
             elif len(name) > MAX_NAME_LENGTH:
                 r.fail(f"{path}.name", f"Name must be {MAX_NAME_LENGTH} characters or fewer.")
         category = _category(r, d, path)
+        owner = "p1"
+        if "owner" in d:
+            raw_owner = r.string(d, "owner", path)
+            owner = raw_owner if raw_owner is not None else "p1"
         loan = _loan_fields(r, d, path)
         if shared_budget:
             if loan.extra_monthly is not None and loan.extra_monthly != 0:
@@ -375,6 +383,7 @@ def _parse_debt_list(
                 loan.lump_sums,
                 payment_mode=loan.mode,
                 monthly_payment=loan.monthly_payment,
+                owner=owner,
             )
         )
     return debts

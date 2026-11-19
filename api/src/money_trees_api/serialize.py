@@ -14,6 +14,7 @@ from money_trees_engine.amortization import (
     ScheduleRow,
 )
 from money_trees_engine.debts import DebtsResult
+from money_trees_engine.household import GROUP_LABELS, HouseholdResult
 from money_trees_engine.strategies import StrategyComparison, StrategyResult
 
 JSON = dict[str, Any]
@@ -185,4 +186,71 @@ def comparison(result: StrategyComparison) -> JSON:
             "debt_free_month": result.debt_free_month_difference,
             "first_payoff_month": result.first_payoff_month_difference,
         },
+    }
+
+
+def ratio(value: Decimal | None) -> str | None:
+    """A ratio with one decimal ("17.5"), or None. The engine has already rounded it."""
+    return None if value is None else f"{value:f}"
+
+
+def household(result: HouseholdResult) -> JSON:
+    t = result.totals
+    nw = result.net_worth
+    return {
+        "household_type": result.household_type.value,
+        "people": [{"id": p.id, "name": p.name} for p in result.people],
+        "incomes": [
+            {"id": i.id, "label": i.label, "owner": i.owner, "monthly": money(i.monthly)}
+            for i in result.incomes
+        ],
+        "lines": [
+            {
+                "id": line.id,
+                "category": line.category.value,
+                "group": line.group.value,
+                "label": line.label,
+                "owner": line.owner,
+                "monthly": money(line.monthly),
+                "source": line.source,
+            }
+            for line in result.lines
+        ],
+        "groups": [
+            {"group": group.value, "label": GROUP_LABELS[group], "total": money(total)}
+            for group, total in result.group_totals.items()
+        ],
+        "totals": {
+            "income": money(t.income),
+            "spending": money(t.spending),
+            "debt_payments": money(t.debt_payments),
+            "saving": money(t.saving),
+            "total_out": money(t.total_out),
+            "left_over": money(t.left_over),
+        },
+        "ratios": {
+            "debt_payments_pct": ratio(result.ratios.debt_payments_pct),
+            "housing_pct": ratio(result.ratios.housing_pct),
+            "savings_rate_pct": ratio(result.ratios.savings_rate_pct),
+            "emergency_fund_months": ratio(result.ratios.emergency_fund_months),
+        },
+        "net_worth": {
+            "total_assets": money(nw.total_assets),
+            "total_debt_balances": money(nw.total_debt_balances),
+            "net_worth": money(nw.net_worth),
+            "liquid_assets": money(nw.liquid_assets),
+        },
+        "by_owner": None
+        if result.by_owner is None
+        else {
+            owner: {
+                "income": money(o.income),
+                "entered_expenses": money(o.entered_expenses),
+                "debt_payments": money(o.debt_payments),
+                "debt_balances": money(o.debt_balances),
+                "assets": money(o.assets),
+            }
+            for owner, o in result.by_owner.items()
+        },
+        "notes": list(result.notes),
     }

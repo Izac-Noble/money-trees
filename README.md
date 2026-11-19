@@ -48,11 +48,12 @@ path, status and duration are. Interactive docs are at `/api/docs`.
 | Method | Path | What it returns |
 | --- | --- | --- |
 | GET | `/api/health` | Status, `APP_ENV`, engine version |
-| GET | `/api/meta` | Categories with suggested terms, input limits, engine version, disclaimer |
+| GET | `/api/meta` | Debt categories, household types, frequencies, expense categories, asset types, input limits, engine version, disclaimer |
 | POST | `/api/amortization` | One loan's summary and schedule (Spec 1) |
 | POST | `/api/debts` | Each debt plus the combined picture (Spec 2) |
 | POST | `/api/strategies` | One payoff strategy: avalanche, snowball or custom (Spec 3) |
 | POST | `/api/strategies/compare` | Avalanche and snowball side by side (Spec 3) |
+| POST | `/api/household` | Monthly cash flow, ratios, net worth and by-owner totals (Spec 6) |
 
 - Money and rates are **strings** (`"200000"`, `"0.06"`), never JSON numbers. Money takes up
   to 2 decimal places, rates up to 6. Months and counts are integers.

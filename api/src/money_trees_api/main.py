@@ -23,7 +23,7 @@ from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 import money_trees_engine
-from money_trees_api import parsing, serialize
+from money_trees_api import household_parsing, parsing, serialize
 from money_trees_api.parsing import FieldError, InvalidInput
 from money_trees_api.settings import Settings
 from money_trees_engine.amortization import (
@@ -44,6 +44,14 @@ from money_trees_engine.debts import (
     DebtInputError,
     analyze_debts,
     notes_for_category,
+)
+from money_trees_engine.household import (
+    ASSET_TYPES,
+    EXPENSE_CATEGORIES,
+    FREQUENCIES,
+    GROUP_LABELS,
+    HouseholdInputError,
+    analyze_household,
 )
 from money_trees_engine.strategies import Strategy, compare_strategies, run_strategy
 
@@ -209,6 +217,28 @@ def create_app(settings: Settings) -> FastAPI:
                 for c, info in CATEGORIES.items()
             ],
             "payment_modes": [m.value for m in PaymentMode],
+            "household_types": [
+                {"value": "single", "label": "Just me"},
+                {"value": "couple", "label": "Couple"},
+            ],
+            "frequencies": [{"value": f.value, "label": i.label} for f, i in FREQUENCIES.items()],
+            "expense_groups": [
+                {"value": g.value, "label": label} for g, label in GROUP_LABELS.items()
+            ],
+            "expense_categories": [
+                {
+                    "value": c.value,
+                    "label": i.label,
+                    "group": i.group.value,
+                    "enterable": i.enterable,
+                    "from_debts": i.from_debts,
+                }
+                for c, i in EXPENSE_CATEGORIES.items()
+            ],
+            "asset_types": [
+                {"value": t.value, "label": i.label, "liquid": i.liquid}
+                for t, i in ASSET_TYPES.items()
+            ],
             "strategies": [s.value for s in Strategy],
             "limits": {
                 "max_debts": MAX_DEBTS,
@@ -277,6 +307,18 @@ def create_app(settings: Settings) -> FastAPI:
         except DebtInputError as exc:
             raise _engine_error(exc, [d.id for d in data.debts]) from None
         return _with_version(serialize.comparison(result))
+
+    @router.post("/household")
+    async def household(request: Request) -> dict[str, Any]:
+        data = household_parsing.parse_household(await _read_json(request))
+        _check_payments(list(data.debts))
+        try:
+            result = analyze_household(data)
+        except HouseholdInputError as exc:
+            raise InvalidInput([FieldError(exc.field, exc.message)]) from None
+        except DebtInputError as exc:
+            raise _engine_error(exc, [d.id for d in data.debts]) from None
+        return _with_version(serialize.household(result))
 
     app.include_router(router)
     return app
