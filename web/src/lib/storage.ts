@@ -4,13 +4,17 @@
  * full, the app keeps working and simply doesn't remember anything.
  */
 
-// The key stays the same across schema versions so saved data is always found;
-// the `version` inside says which shape it has. Older versions are upgraded on read.
-export const STORAGE_KEY = "money-trees:v1";
-export const SCHEMA_VERSION = 3;
+/** Spec 7: the household moved saving to a new key. */
+export const STORAGE_KEY = "money-trees:v2";
+/** The old key. Its data (loan form, debts, payoff extra) is carried over, then removed. */
+export const LEGACY_STORAGE_KEY = "money-trees:v1";
+/** The shape inside the file. Versions 1 to 3 (no household) are upgraded on read. */
+export const SCHEMA_VERSION = 4;
 
 export type TermUnit = "years" | "months";
 export type PaymentMode = "fixed_term" | "fixed_payment";
+export type Owner = "p1" | "p2" | "joint";
+export type HouseholdKind = "single" | "couple";
 
 export type LumpSumInput = { key: string; month: string; amount: string };
 
@@ -38,11 +42,46 @@ export type DebtInput = {
   termUnit: TermUnit;
   /** Kept when switching to time left. */
   monthlyPayment: string;
+  /** Whose debt this is (couples). Singles always send p1. */
+  owner: Owner;
+};
+
+export type IncomeInput = {
+  key: string;
+  label: string;
+  amount: string;
+  frequency: string;
+  owner: Owner;
+};
+
+/** A ready-made expense row, one per category. A blank amount just means none. */
+export type ExpenseInput = { amount: string; frequency: string; owner: Owner };
+
+export type CustomExpenseInput = ExpenseInput & { key: string; label: string };
+
+export type AssetInput = {
+  key: string;
+  type: string;
+  label: string;
+  value: string;
+  owner: Owner;
+};
+
+export type HouseholdInput = {
+  kind: HouseholdKind;
+  /** First names: [p1, p2]. The second is only used for couples. */
+  names: [string, string];
+  incomes: IncomeInput[];
+  /** Ready-made rows by expense category id. */
+  expenses: Record<string, ExpenseInput>;
+  customExpenses: CustomExpenseInput[];
+  assets: AssetInput[];
 };
 
 export type PlanInput = { extra: string };
 
 export type AppData = {
+  household: HouseholdInput;
   loan: LoanInput;
   debts: DebtInput[];
   /** The time unit picked last, anywhere in the app. New time fields start on it. */
@@ -52,8 +91,20 @@ export type AppData = {
 
 export type SavedFile = { version: typeof SCHEMA_VERSION; data: AppData };
 
+export function emptyHousehold(): HouseholdInput {
+  return {
+    kind: "single",
+    names: ["", ""],
+    incomes: [],
+    expenses: {},
+    customExpenses: [],
+    assets: [],
+  };
+}
+
 export function emptyData(): AppData {
   return {
+    household: emptyHousehold(),
     loan: { amount: "", ratePercent: "", term: "", termUnit: "years", extra: "", lumpSums: [] },
     debts: [],
     timeUnit: "years",
@@ -73,6 +124,7 @@ export function newDebt(id: string, termUnit: TermUnit): DebtInput {
     term: "",
     termUnit,
     monthlyPayment: "",
+    owner: "joint",
   };
 }
 
@@ -92,6 +144,10 @@ function isUnit(value: unknown): value is TermUnit {
 
 function isMode(value: unknown): value is PaymentMode {
   return value === "fixed_term" || value === "fixed_payment";
+}
+
+export function isOwner(value: unknown): value is Owner {
+  return value === "p1" || value === "p2" || value === "joint";
 }
 
 function parseLoan(value: unknown): LoanInput | null {
@@ -142,16 +198,84 @@ function parseDebts(value: unknown, version: number): DebtInput[] | null {
       debt.monthlyPayment = item.monthlyPayment;
       debt.modeChosen = item.modeChosen;
     }
+    if (version >= 4) {
+      if (!isOwner(item.owner)) return null;
+      debt.owner = item.owner;
+    }
     debts.push(debt);
   }
   return debts;
+}
+
+function parseHousehold(value: unknown): HouseholdInput | null {
+  if (!isObj(value)) return null;
+  if (value.kind !== "single" && value.kind !== "couple") return null;
+  const names = value.names;
+  if (!Array.isArray(names) || names.length !== 2 || !names.every((n) => typeof n === "string")) {
+    return null;
+  }
+  const rowKeys = ["amount", "frequency"] as const;
+  const incomes: IncomeInput[] = [];
+  if (!Array.isArray(value.incomes)) return null;
+  for (const item of value.incomes) {
+    if (!strings(item, ["key", "label", ...rowKeys]) || !isOwner(item.owner)) return null;
+    incomes.push({
+      key: String(item.key),
+      label: String(item.label),
+      amount: String(item.amount),
+      frequency: String(item.frequency),
+      owner: item.owner,
+    });
+  }
+  if (!isObj(value.expenses)) return null;
+  const expenses: Record<string, ExpenseInput> = {};
+  for (const [category, item] of Object.entries(value.expenses)) {
+    if (!strings(item, rowKeys) || !isOwner(item.owner)) return null;
+    expenses[category] = {
+      amount: String(item.amount),
+      frequency: String(item.frequency),
+      owner: item.owner,
+    };
+  }
+  if (!Array.isArray(value.customExpenses)) return null;
+  const customExpenses: CustomExpenseInput[] = [];
+  for (const item of value.customExpenses) {
+    if (!strings(item, ["key", "label", ...rowKeys]) || !isOwner(item.owner)) return null;
+    customExpenses.push({
+      key: String(item.key),
+      label: String(item.label),
+      amount: String(item.amount),
+      frequency: String(item.frequency),
+      owner: item.owner,
+    });
+  }
+  if (!Array.isArray(value.assets)) return null;
+  const assets: AssetInput[] = [];
+  for (const item of value.assets) {
+    if (!strings(item, ["key", "type", "label", "value"]) || !isOwner(item.owner)) return null;
+    assets.push({
+      key: String(item.key),
+      type: String(item.type),
+      label: String(item.label),
+      value: String(item.value),
+      owner: item.owner,
+    });
+  }
+  return {
+    kind: value.kind,
+    names: [String(names[0]), String(names[1])],
+    incomes,
+    expenses,
+    customExpenses,
+    assets,
+  };
 }
 
 /** Validate an untrusted saved file (from storage or an import). Null if invalid. */
 export function parseSaved(value: unknown): AppData | null {
   if (!isObj(value) || !isObj(value.data)) return null;
   const version = value.version;
-  if (version !== 1 && version !== 2 && version !== SCHEMA_VERSION) return null;
+  if (version !== 1 && version !== 2 && version !== 3 && version !== SCHEMA_VERSION) return null;
   const data = value.data;
   const loan = parseLoan(data.loan);
   const debts = parseDebts(data.debts, version);
@@ -159,11 +283,17 @@ export function parseSaved(value: unknown): AppData | null {
   // Versions 1 and 2 also had a currency setting; USD is the only currency now.
   let timeUnit: TermUnit = "years";
   if (version === 2 && isUnit(data.debtTermUnit)) timeUnit = data.debtTermUnit;
-  if (version === SCHEMA_VERSION) {
+  if (version >= 3) {
     if (!isUnit(data.timeUnit)) return null;
     timeUnit = data.timeUnit;
   }
-  return { loan, debts, timeUnit, plan: { extra: String(data.plan.extra) } };
+  let household = emptyHousehold();
+  if (version === SCHEMA_VERSION) {
+    const parsed = parseHousehold(data.household);
+    if (!parsed) return null;
+    household = parsed;
+  }
+  return { household, loan, debts, timeUnit, plan: { extra: String(data.plan.extra) } };
 }
 
 export function toSaved(data: AppData): SavedFile {
@@ -178,11 +308,23 @@ function storage(): Storage | null {
   }
 }
 
+/**
+ * Load saved data. On first load after Spec 7, data under the old key is carried
+ * over to the new one (loan form, debts, payoff extra), then the old key is removed.
+ */
 export function loadData(): AppData {
   try {
-    const raw = storage()?.getItem(STORAGE_KEY);
-    if (!raw) return emptyData();
-    return parseSaved(JSON.parse(raw)) ?? emptyData();
+    const store = storage();
+    if (!store) return emptyData();
+    const raw = store.getItem(STORAGE_KEY);
+    if (raw) return parseSaved(JSON.parse(raw)) ?? emptyData();
+    const legacy = store.getItem(LEGACY_STORAGE_KEY);
+    if (!legacy) return emptyData();
+    const migrated = parseSaved(JSON.parse(legacy));
+    if (!migrated) return emptyData();
+    store.setItem(STORAGE_KEY, JSON.stringify(toSaved(migrated)));
+    store.removeItem(LEGACY_STORAGE_KEY);
+    return migrated;
   } catch {
     return emptyData();
   }
@@ -203,6 +345,7 @@ export function saveData(data: AppData): boolean {
 export function clearData(): void {
   try {
     storage()?.removeItem(STORAGE_KEY);
+    storage()?.removeItem(LEGACY_STORAGE_KEY);
   } catch {
     // Nothing to clear if storage is unavailable.
   }

@@ -47,6 +47,7 @@ from money_trees_engine.debts import (
 )
 from money_trees_engine.household import (
     ASSET_TYPES,
+    DEBT_TO_EXPENSE,
     EXPENSE_CATEGORIES,
     FREQUENCIES,
     GROUP_LABELS,
@@ -213,6 +214,8 @@ def create_app(settings: Settings) -> FastAPI:
                     "label": info.label,
                     "default_payment_mode": info.default_mode.value,
                     "suggested_term_months": info.suggested_term_months,
+                    # The household expense line this debt's payment lands on (Spec 6).
+                    "expense_category": DEBT_TO_EXPENSE[c].value,
                 }
                 for c, info in CATEGORIES.items()
             ],

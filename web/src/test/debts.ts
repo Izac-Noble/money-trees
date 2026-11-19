@@ -12,6 +12,7 @@ function loan(id: string, name: string, category: string, balance: string, rate:
     term: months,
     termUnit: "months",
     monthlyPayment: "",
+    owner: "p1",
   };
 }
 
@@ -34,4 +35,5 @@ export const CARD: DebtInput = {
   term: "",
   termUnit: "years",
   monthlyPayment: "200",
+  owner: "p1",
 };

@@ -12,6 +12,7 @@ import {
   type AppData,
 } from "./lib/storage";
 import { DebtsTab } from "./tabs/DebtsTab";
+import { HouseholdTab } from "./tabs/HouseholdTab";
 import { LoanTab } from "./tabs/LoanTab";
 import { PlanTab } from "./tabs/PlanTab";
 
@@ -19,22 +20,29 @@ import { PlanTab } from "./tabs/PlanTab";
 export const FALLBACK_DISCLAIMER = "Estimates for learning and planning, not financial advice.";
 
 export const TABS = [
-  { id: "loan", label: "Loan" },
+  { id: "household", label: "Household" },
   { id: "debts", label: "Debts" },
   { id: "plan", label: "Payoff Plan" },
+  { id: "loan", label: "Loan" },
 ] as const;
 
 export type TabId = (typeof TABS)[number]["id"];
 
 function tabFromHash(hash: string): TabId {
   const id = hash.replace(/^#/, "");
-  return TABS.find((t) => t.id === id)?.id ?? "loan";
+  return TABS.find((t) => t.id === id)?.id ?? "household";
 }
 
 function describe(data: AppData): string {
   const debts = `${data.debts.length} ${data.debts.length === 1 ? "debt" : "debts"}`;
   const loan = data.loan.amount ? "loan details" : "an empty loan form";
-  return `${loan}, ${debts} and the payoff plan extra`;
+  const h = data.household;
+  const filled =
+    h.names.some((n) => n.trim()) ||
+    h.incomes.length + h.customExpenses.length + h.assets.length > 0 ||
+    Object.values(h.expenses).some((e) => e.amount.trim());
+  const household = filled ? "your household" : "an empty household";
+  return `${household}, ${loan}, ${debts} and the payoff plan extra`;
 }
 
 /** FileReader rather than File.text(), which some older browsers lack. */
@@ -132,6 +140,9 @@ export default function App() {
 
   const disclaimer = meta?.disclaimer ?? FALLBACK_DISCLAIMER;
   const panels: Record<TabId, ReactNode> = {
+    household: (
+      <HouseholdTab data={data} onChange={setData} currency={CURRENCY} meta={meta} />
+    ),
     loan: (
       <LoanTab
         loan={data.loan}
@@ -156,6 +167,7 @@ export default function App() {
         currency={CURRENCY}
         meta={meta}
         disclaimer={disclaimer}
+        household={{ kind: data.household.kind, names: data.household.names }}
       />
     ),
     plan: (

@@ -16,8 +16,21 @@ export type Meta = {
     label: string;
     default_payment_mode: "fixed_term" | "fixed_payment";
     suggested_term_months: number | null;
+    /** The household expense line this debt's payment lands on. */
+    expense_category: string;
   }[];
   payment_modes: string[];
+  household_types: { value: "single" | "couple"; label: string }[];
+  frequencies: { value: string; label: string }[];
+  expense_groups: { value: string; label: string }[];
+  expense_categories: {
+    value: string;
+    label: string;
+    group: string;
+    enterable: boolean;
+    from_debts: boolean;
+  }[];
+  asset_types: { value: string; label: string; liquid: boolean }[];
   strategies: string[];
   limits: {
     max_debts: number;
@@ -209,4 +222,76 @@ export function postCompare(
   signal?: AbortSignal,
 ): Promise<ApiResult<CompareResponse>> {
   return postJson<CompareResponse>("/strategies/compare", body, signal);
+}
+
+type Owner = "p1" | "p2" | "joint";
+
+export type HouseholdRequest = {
+  household_type: "single" | "couple";
+  people: { id: "p1" | "p2"; name: string }[];
+  incomes: { id: string; label: string; owner: Owner; amount: string; frequency: string }[];
+  expenses: {
+    id: string;
+    category: string;
+    owner: Owner;
+    amount: string;
+    frequency: string;
+    label?: string;
+  }[];
+  assets: { id: string; type: string; owner: Owner; value: string; label?: string }[];
+  debts: (DebtRequest & { owner: Owner })[];
+};
+
+export type OwnerTotals = {
+  income: string;
+  entered_expenses: string;
+  debt_payments: string;
+  debt_balances: string;
+  assets: string;
+};
+
+export type HouseholdResponse = {
+  engine_version: string;
+  household_type: "single" | "couple";
+  people: { id: string; name: string }[];
+  incomes: { id: string; label: string; owner: string; monthly: string }[];
+  lines: {
+    id: string;
+    category: string;
+    group: string;
+    label: string;
+    owner: string;
+    monthly: string;
+    source: "entered" | "debts";
+  }[];
+  groups: { group: string; label: string; total: string }[];
+  totals: {
+    income: string;
+    spending: string;
+    debt_payments: string;
+    saving: string;
+    total_out: string;
+    left_over: string;
+  };
+  ratios: {
+    debt_payments_pct: string | null;
+    housing_pct: string | null;
+    savings_rate_pct: string | null;
+    emergency_fund_months: string | null;
+  };
+  net_worth: {
+    total_assets: string;
+    total_debt_balances: string;
+    net_worth: string;
+    liquid_assets: string;
+  };
+  by_owner: Record<"p1" | "p2" | "joint", OwnerTotals> | null;
+  notes: string[];
+};
+
+export function postHousehold(
+  body: HouseholdRequest,
+  signal?: AbortSignal,
+): Promise<ApiResult<HouseholdResponse>> {
+  return postJson<HouseholdResponse>("/household", body, signal);
 }

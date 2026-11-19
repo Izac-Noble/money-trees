@@ -7,7 +7,8 @@ import { mockApi } from "./test/mockApi";
 const DISCLAIMER = "Estimates for learning and planning, not financial advice.";
 
 beforeEach(() => {
-  window.history.replaceState(null, "", "/");
+  // Most tests below use the Loan tab's form.
+  window.history.replaceState(null, "", "/#loan");
   localStorage.clear();
 });
 
@@ -32,14 +33,20 @@ async function chooseFile(content: string) {
 }
 
 describe("App shell", () => {
-  it("shows three tabs and the disclaimer from /api/meta", async () => {
+  it("shows the tabs, opens on Household, and shows the disclaimer from /api/meta", async () => {
     mockApi();
+    window.history.replaceState(null, "", "/");
     render(<App />);
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
-      "Loan",
+      "Household",
       "Debts",
       "Payoff Plan",
+      "Loan",
     ]);
+    expect(screen.getByRole("tab", { name: "Household" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     expect(await screen.findByRole("contentinfo")).toHaveTextContent(DISCLAIMER);
     expect(fetch).toHaveBeenCalledWith("/api/meta", expect.anything());
   });
@@ -58,13 +65,15 @@ describe("App shell", () => {
     render(<App />);
     const loan = screen.getByRole("tab", { name: "Loan" });
     fireEvent.keyDown(loan, { key: "ArrowRight" });
-    const debts = screen.getByRole("tab", { name: "Debts" });
-    expect(debts).toHaveAttribute("aria-selected", "true");
-    expect(debts).toHaveFocus();
-    fireEvent.keyDown(debts, { key: "End" });
-    expect(screen.getByRole("tab", { name: "Payoff Plan" })).toHaveFocus();
-    fireEvent.keyDown(screen.getByRole("tab", { name: "Payoff Plan" }), { key: "ArrowRight" });
+    const household = screen.getByRole("tab", { name: "Household" });
+    expect(household).toHaveAttribute("aria-selected", "true");
+    expect(household).toHaveFocus();
+    fireEvent.keyDown(household, { key: "ArrowRight" });
+    expect(screen.getByRole("tab", { name: "Debts" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Debts" }), { key: "End" });
     expect(loan).toHaveFocus();
+    fireEvent.keyDown(loan, { key: "Home" });
+    expect(household).toHaveFocus();
   });
 
   it("remembers the last time unit picked, for every tab", () => {
