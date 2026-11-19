@@ -33,17 +33,18 @@ async function chooseFile(content: string) {
 }
 
 describe("App shell", () => {
-  it("shows the tabs, opens on Household, and shows the disclaimer from /api/meta", async () => {
+  it("shows the tabs, opens on Overview, and shows the disclaimer from /api/meta", async () => {
     mockApi();
     window.history.replaceState(null, "", "/");
     render(<App />);
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
+      "Overview",
       "Household",
       "Debts",
       "Payoff Plan",
       "Loan",
     ]);
-    expect(screen.getByRole("tab", { name: "Household" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -65,15 +66,15 @@ describe("App shell", () => {
     render(<App />);
     const loan = screen.getByRole("tab", { name: "Loan" });
     fireEvent.keyDown(loan, { key: "ArrowRight" });
-    const household = screen.getByRole("tab", { name: "Household" });
-    expect(household).toHaveAttribute("aria-selected", "true");
-    expect(household).toHaveFocus();
-    fireEvent.keyDown(household, { key: "ArrowRight" });
-    expect(screen.getByRole("tab", { name: "Debts" })).toHaveFocus();
-    fireEvent.keyDown(screen.getByRole("tab", { name: "Debts" }), { key: "End" });
+    const overview = screen.getByRole("tab", { name: "Overview" });
+    expect(overview).toHaveAttribute("aria-selected", "true");
+    expect(overview).toHaveFocus();
+    fireEvent.keyDown(overview, { key: "ArrowRight" });
+    expect(screen.getByRole("tab", { name: "Household" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Household" }), { key: "End" });
     expect(loan).toHaveFocus();
     fireEvent.keyDown(loan, { key: "Home" });
-    expect(household).toHaveFocus();
+    expect(overview).toHaveFocus();
   });
 
   it("remembers the last time unit picked, for every tab", () => {

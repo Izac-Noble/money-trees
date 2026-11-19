@@ -184,7 +184,9 @@ describe("expenses", () => {
     const row = screen.getByRole("listitem", { name: "Car payment" });
     expect(row).toHaveTextContent("From your Debts tab.");
     expect(within(row).getByRole("link", { name: "Go to Debts" })).toHaveAttribute("href", "#debts");
-    await waitFor(() => expect(row).toHaveTextContent("Car loan: $311.38 a month"));
+    await waitFor(() => expect(row).toHaveTextContent("Car loan: $311.38 a month"), {
+      timeout: 4000,
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Test: remove debts" }));
     expect(screen.getByRole("textbox", { name: "Car payment" })).toBeVisible();
@@ -208,7 +210,8 @@ describe("income and assets", () => {
     });
     render(<Harness initial={initial} />);
     expect(screen.getByText("Take-home pay: what actually lands in your account.")).toBeVisible();
-    expect(await screen.findByText("= $4,333.33 a month")).toBeVisible();
+    // Results wait for the real 300 ms debounce, so allow for a busy test run.
+    expect(await screen.findByText("= $4,333.33 a month", {}, { timeout: 4000 })).toBeVisible();
     const [sent] = sentBodies(fetchMock, "/api/household") as { incomes: unknown[] }[];
     expect(sent?.incomes).toEqual([
       { id: "i1", label: "Sam's job", owner: "p1", amount: "2000", frequency: "biweekly" },

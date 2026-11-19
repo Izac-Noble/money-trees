@@ -14,12 +14,14 @@ import {
 import { DebtsTab } from "./tabs/DebtsTab";
 import { HouseholdTab } from "./tabs/HouseholdTab";
 import { LoanTab } from "./tabs/LoanTab";
+import { OverviewTab } from "./tabs/OverviewTab";
 import { PlanTab } from "./tabs/PlanTab";
 
 /** Shown until /api/meta answers, so the footer is never empty. Same text the API serves. */
 export const FALLBACK_DISCLAIMER = "Estimates for learning and planning, not financial advice.";
 
 export const TABS = [
+  { id: "overview", label: "Overview" },
   { id: "household", label: "Household" },
   { id: "debts", label: "Debts" },
   { id: "plan", label: "Payoff Plan" },
@@ -30,7 +32,7 @@ export type TabId = (typeof TABS)[number]["id"];
 
 function tabFromHash(hash: string): TabId {
   const id = hash.replace(/^#/, "");
-  return TABS.find((t) => t.id === id)?.id ?? "household";
+  return TABS.find((t) => t.id === id)?.id ?? "overview";
 }
 
 function describe(data: AppData): string {
@@ -140,6 +142,20 @@ export default function App() {
 
   const disclaimer = meta?.disclaimer ?? FALLBACK_DISCLAIMER;
   const panels: Record<TabId, ReactNode> = {
+    overview: (
+      <OverviewTab
+        data={data}
+        currency={CURRENCY}
+        meta={meta}
+        disclaimer={disclaimer}
+        onGoTo={(id) => selectTab(id)}
+        onSeePayoffPlan={(extra) => {
+          // An invitation, not a recommendation: the Plan tab shows it and the user can change it.
+          setData((d) => ({ ...d, plan: { extra } }));
+          selectTab("plan");
+        }}
+      />
+    ),
     household: (
       <HouseholdTab data={data} onChange={setData} currency={CURRENCY} meta={meta} />
     ),
@@ -239,7 +255,11 @@ export default function App() {
       </header>
 
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-4">
-        <div role="tablist" aria-label="Calculators" className="flex gap-1 border-b border-stone-200">
+        <div
+          role="tablist"
+          aria-label="Sections"
+          className="flex flex-wrap gap-x-1 border-b border-stone-200"
+        >
           {TABS.map((t) => (
             <button
               key={t.id}
