@@ -1,30 +1,63 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { postDebts, type DebtRequest, type DebtsResponse, type Meta } from "../api";
 import { LineChart } from "../components/LineChart";
-import { FieldMessage, SummaryCard, TextField } from "../components/fields";
-import { CATEGORY_LABELS, buildDebts, termAfterCategoryChange } from "../lib/debtRequest";
+import { FieldMessage, SummaryCard, TermField, TextField } from "../components/fields";
+import {
+  CATEGORY_LABELS,
+  DEBT_FIELDS,
+  buildDebts,
+  incompleteNote,
+  termAfterCategoryChange,
+  type DebtField,
+} from "../lib/debtRequest";
 import { formatDuration, formatMoney, type Currency } from "../lib/format";
-import { newKey, type DebtInput } from "../lib/storage";
+import { newKey, type DebtInput, type TermUnit } from "../lib/storage";
 import { splitErrors, useCalculation } from "../lib/useCalculation";
+import { useTouched } from "../lib/useTouched";
 
 const MAX_DEBTS_FALLBACK = 20;
+
+/** Element id suffix for each field, used for labels and for moving focus. */
+const INPUT_SUFFIX: Record<DebtField, string> = {
+  name: "name",
+  category: "category",
+  principal: "balance",
+  annual_rate: "rate",
+  term_months: "term",
+};
+
+const inputId = (debtId: string, field: DebtField) => `debt-${debtId}-${INPUT_SUFFIX[field]}`;
+const touchKey = (debtId: string, field: DebtField) => `${debtId}.${field}`;
 
 type Props = {
   debts: DebtInput[];
   onChange: (debts: DebtInput[]) => void;
+  /** The unit last picked for time left; new debts start with it. */
+  termUnit: TermUnit;
+  onTermUnitChange: (unit: TermUnit) => void;
   currency: Currency;
   meta: Meta | null;
   disclaimer: string;
 };
 
-export function DebtsTab({ debts, onChange, currency, meta, disclaimer }: Props) {
+export function DebtsTab({
+  debts,
+  onChange,
+  termUnit,
+  onTermUnitChange,
+  currency,
+  meta,
+  disclaimer,
+}: Props) {
   const built = useMemo(() => buildDebts(debts), [debts]);
-  const requestKey = built.debts ? JSON.stringify(built.debts) : "";
+  const requestKey = built.debts.length ? JSON.stringify(built.debts) : "";
   const status = useCalculation<DebtsResponse>(requestKey, (key, signal) =>
     postDebts(JSON.parse(key) as DebtRequest[], signal),
   );
   const { byField, general } = splitErrors(status);
-  const errorFor = (field: string) => built.errors[field] ?? byField[field];
+  const touched = useTouched();
+  const [focusTarget, setFocusTarget] = useState<string | null>(null);
+  const [addBlocked, setAddBlocked] = useState(false);
   const money = (v: string) => formatMoney(v, currency);
   const symbol = currency === "USD" ? "$" : "UGX";
   const maxDebts = meta?.limits.max_debts ?? MAX_DEBTS_FALLBACK;
@@ -32,8 +65,62 @@ export function DebtsTab({ debts, onChange, currency, meta, disclaimer }: Props)
     meta?.categories ??
     Object.keys(CATEGORY_LABELS).map((value) => ({ value, suggested_term_months: null }));
 
-  const update = (id: string, patch: Partial<DebtInput>) =>
+  // API errors use the request's indexes, which skip incomplete debts.
+  const apiErrors: Record<string, Partial<Record<DebtField, string>>> = {};
+  for (const [field, message] of Object.entries(byField)) {
+    const match = /^debts\[(\d+)\]\.(\w+)$/.exec(field);
+    const row = match ? built.rowIndex[Number(match[1])] : undefined;
+    const debt = row === undefined ? undefined : debts[row];
+    if (debt && match && (DEBT_FIELDS as readonly string[]).includes(match[2]!)) {
+      (apiErrors[debt.id] ??= {})[match[2] as DebtField] = message;
+    } else {
+      general.push(message);
+    }
+  }
+
+  const errorFor = (debtId: string, field: DebtField) =>
+    (touched.isVisible(touchKey(debtId, field)) ? built.problems[debtId]?.[field] : undefined) ||
+    apiErrors[debtId]?.[field];
+
+  useEffect(() => {
+    if (!focusTarget) return;
+    document.getElementById(focusTarget)?.focus();
+    setFocusTarget(null);
+  }, [focusTarget]);
+
+  const update = (id: string, patch: Partial<DebtInput>) => {
+    setAddBlocked(false);
     onChange(debts.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+  };
+
+  const addDebt = () => {
+    // "Add debt" needs the debts above to be complete: show every missing field
+    // and move focus to the first one instead of adding another row.
+    const firstIncomplete = debts.find((d) => built.incomplete.includes(d.id));
+    if (firstIncomplete) {
+      const keys: string[] = [];
+      let first: string | null = null;
+      for (const d of debts) {
+        for (const field of DEBT_FIELDS) {
+          if (!built.problems[d.id]?.[field]) continue;
+          keys.push(touchKey(d.id, field));
+          first ??= inputId(d.id, field);
+        }
+      }
+      touched.revealAll(keys);
+      setAddBlocked(true);
+      setFocusTarget(first);
+      return;
+    }
+    const id = newKey();
+    onChange([
+      ...debts,
+      { id, name: "", category: "", balance: "", ratePercent: "", term: "", termUnit },
+    ]);
+    setFocusTarget(inputId(id, "name"));
+  };
+
+  const incompleteCount = built.incomplete.length;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
@@ -42,40 +129,55 @@ export function DebtsTab({ debts, onChange, currency, meta, disclaimer }: Props)
           Your debts
         </h2>
         <p className="mt-1 text-sm text-stone-700">
-          Enter what you owe now and the months left, not the original loan. Credit cards aren't
-          included yet. They work differently from loans and are coming later.
+          Credit cards aren't included yet. They work differently from loans and are coming later.
         </p>
         <ol className="mt-3 space-y-3">
           {debts.map((debt, i) => {
-            const path = `debts[${i}]`;
             const label = debt.name.trim() || `Debt ${i + 1}`;
+            const incomplete = built.incomplete.includes(debt.id);
+            const field = (f: DebtField) => ({
+              id: inputId(debt.id, f),
+              onBlur: () => touched.touch(touchKey(debt.id, f)),
+              error: errorFor(debt.id, f),
+              required: true,
+            });
+            const categoryError = errorFor(debt.id, "category");
             return (
               <li key={debt.id} className="rounded-xl border border-stone-200 bg-white p-3">
                 <fieldset className="space-y-3">
-                  <legend className="text-sm font-semibold">{label}</legend>
+                  <legend className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                    {label}
+                    {incomplete && (
+                      <span className="rounded-full border border-stone-400 px-2 py-0.5 text-xs font-medium text-stone-700">
+                        Incomplete
+                      </span>
+                    )}
+                  </legend>
                   <TextField
-                    id={`debt-${debt.id}-name`}
+                    {...field("name")}
                     label="Name"
                     inputMode="text"
-                    placeholder="For example, Honda loan"
+                    hint="A name you'll recognize, like Honda loan."
                     value={debt.name}
                     onChange={(name) => update(debt.id, { name })}
-                    error={errorFor(`${path}.name`)}
                   />
                   <div>
-                    <label htmlFor={`debt-${debt.id}-category`} className="block text-sm font-medium">
-                      Category
+                    <label htmlFor={inputId(debt.id, "category")} className="block text-sm font-medium">
+                      Type
+                      <span className="ml-1 text-xs font-normal text-stone-600">(required)</span>
                     </label>
                     <select
-                      id={`debt-${debt.id}-category`}
-                      className={`mt-1 w-full rounded-lg border bg-white px-2 py-2 ${
-                        errorFor(`${path}.category`) ? "border-red-700" : "border-stone-300"
+                      id={inputId(debt.id, "category")}
+                      className={`mt-1 w-full rounded-lg bg-white px-2 py-2 ${
+                        categoryError ? "border-2 border-red-700" : "border border-stone-300"
                       }`}
                       value={debt.category}
-                      aria-invalid={errorFor(`${path}.category`) ? true : undefined}
+                      aria-required="true"
+                      aria-invalid={categoryError ? true : undefined}
                       aria-describedby={
-                        errorFor(`${path}.category`) ? `debt-${debt.id}-category-error` : undefined
+                        categoryError ? `${inputId(debt.id, "category")}-error` : undefined
                       }
+                      onBlur={() => touched.touch(touchKey(debt.id, "category"))}
                       onChange={(e) => {
                         const category = e.target.value;
                         const suggested = categories.find(
@@ -83,54 +185,59 @@ export function DebtsTab({ debts, onChange, currency, meta, disclaimer }: Props)
                         )?.suggested_term_months;
                         update(debt.id, {
                           category,
-                          termMonths: termAfterCategoryChange(debt.termMonths, suggested),
+                          ...termAfterCategoryChange(debt, suggested),
                         });
                       }}
                     >
-                      <option value="">Choose a category</option>
+                      <option value="">Choose a type</option>
                       {categories.map((c) => (
                         <option key={c.value} value={c.value}>
                           {CATEGORY_LABELS[c.value] ?? c.value}
                         </option>
                       ))}
                     </select>
-                    {errorFor(`${path}.category`) && (
-                      <FieldMessage id={`debt-${debt.id}-category-error`}>
-                        {errorFor(`${path}.category`)}
+                    {categoryError && (
+                      <FieldMessage id={`${inputId(debt.id, "category")}-error`}>
+                        {categoryError}
                       </FieldMessage>
                     )}
                   </div>
                   <TextField
-                    id={`debt-${debt.id}-balance`}
+                    {...field("principal")}
                     label="Balance owed"
+                    hint="What you still owe today, not the original loan amount."
                     prefix={symbol}
                     value={debt.balance}
                     onChange={(balance) => update(debt.id, { balance })}
-                    error={errorFor(`${path}.principal`)}
                   />
-                  <div className="grid grid-cols-2 gap-2">
-                    <TextField
-                      id={`debt-${debt.id}-rate`}
-                      label="Rate (%)"
-                      suffix="%"
-                      value={debt.ratePercent}
-                      onChange={(ratePercent) => update(debt.id, { ratePercent })}
-                      error={errorFor(`${path}.annual_rate`)}
-                    />
-                    <TextField
-                      id={`debt-${debt.id}-term`}
-                      label="Months left"
-                      inputMode="numeric"
-                      value={debt.termMonths}
-                      onChange={(termMonths) => update(debt.id, { termMonths })}
-                      error={errorFor(`${path}.term_months`)}
-                    />
-                  </div>
+                  <TextField
+                    {...field("annual_rate")}
+                    label="Interest rate (%)"
+                    hint="The yearly rate on your statement."
+                    suffix="%"
+                    value={debt.ratePercent}
+                    onChange={(ratePercent) => update(debt.id, { ratePercent })}
+                  />
+                  <TermField
+                    {...field("term_months")}
+                    label="Time left to pay"
+                    hint="How long until this is paid off on your current schedule. Check your loan statement."
+                    value={debt.term}
+                    unit={debt.termUnit}
+                    onChange={(term) => update(debt.id, { term })}
+                    onUnitChange={(unit) => {
+                      onTermUnitChange(unit);
+                      update(debt.id, { termUnit: unit });
+                    }}
+                  />
                   <button
                     type="button"
                     className="btn-secondary"
                     aria-label={`Delete ${label}`}
-                    onClick={() => onChange(debts.filter((d) => d.id !== debt.id))}
+                    onClick={() => {
+                      setAddBlocked(false);
+                      onChange(debts.filter((d) => d.id !== debt.id));
+                    }}
                   >
                     Delete
                   </button>
@@ -143,38 +250,32 @@ export function DebtsTab({ debts, onChange, currency, meta, disclaimer }: Props)
           type="button"
           className="btn-secondary mt-3"
           disabled={debts.length >= maxDebts}
-          onClick={() =>
-            onChange([
-              ...debts,
-              {
-                id: newKey(),
-                name: "",
-                category: "",
-                balance: "",
-                ratePercent: "",
-                termMonths: "",
-              },
-            ])
-          }
+          onClick={addDebt}
         >
-          Add a debt
+          Add debt
         </button>
-        {debts.length >= maxDebts && (
-          <p className="mt-1 text-xs text-stone-600">You can add up to {maxDebts} debts.</p>
-        )}
+        <div role="status" aria-live="polite" className="mt-1 text-sm text-stone-700">
+          {addBlocked && incompleteCount > 0 && "Finish the fields marked above to add another debt."}
+          {debts.length >= maxDebts && `You can add up to ${maxDebts} debts.`}
+        </div>
       </section>
 
       <section aria-labelledby="debts-results-heading" className="min-w-0">
         <h2 id="debts-results-heading" className="text-lg font-semibold">
           Results
         </h2>
+        {incompleteCount > 0 && built.debts.length > 0 && (
+          <p className="mt-1 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700">
+            {incompleteNote(incompleteCount)}
+          </p>
+        )}
         <div role="status" aria-live="polite" className="mt-1 text-sm text-stone-700">
           {status.kind === "idle" &&
             (debts.length === 0
               ? "Add a debt to see results."
-              : "Fill in every debt's name, category, balance, rate and months left to see results.")}
+              : "Results appear once a debt has a name, type, balance, rate and time left.")}
           {status.kind === "loading" && "Updating results..."}
-          {status.kind === "error" && Object.keys(byField).length > 0 && (
+          {status.kind === "error" && Object.keys(apiErrors).length > 0 && (
             <span>Some details need fixing. See the messages next to the fields.</span>
           )}
         </div>

@@ -144,6 +144,8 @@ export default function App() {
       <DebtsTab
         debts={data.debts}
         onChange={(debts) => setData((d) => ({ ...d, debts }))}
+        termUnit={data.debtTermUnit}
+        onTermUnitChange={(debtTermUnit) => setData((d) => ({ ...d, debtTermUnit }))}
         currency={data.currency}
         meta={meta}
         disclaimer={disclaimer}

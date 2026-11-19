@@ -7,10 +7,11 @@ import {
 } from "../api";
 import { LineChart } from "../components/LineChart";
 import { TextField } from "../components/fields";
-import { buildDebts } from "../lib/debtRequest";
+import { buildDebts, incompleteNote } from "../lib/debtRequest";
 import { formatDuration, formatMoney, type Currency } from "../lib/format";
 import type { DebtInput, PlanInput } from "../lib/storage";
 import { splitErrors, useCalculation } from "../lib/useCalculation";
+import { useTouched } from "../lib/useTouched";
 import { checkMoney } from "../lib/validate";
 
 export const STRATEGY_TEXT = {
@@ -35,7 +36,9 @@ type Props = {
 export function PlanTab({ debts, plan, onChange, currency, disclaimer }: Props) {
   const built = useMemo(() => buildDebts(debts), [debts]);
   const extra = checkMoney(plan.extra, { optional: true });
-  const ready = built.debts !== null && "value" in extra;
+  const touched = useTouched();
+  // Incomplete debts are left out; the rest still compare.
+  const ready = built.debts.length > 0 && "value" in extra;
   const requestKey = ready
     ? JSON.stringify({ debts: built.debts, extra_monthly: "value" in extra ? extra.value : "0" })
     : "";
@@ -76,7 +79,11 @@ export function PlanTab({ debts, plan, onChange, currency, disclaimer }: Props) 
             prefix={currency === "USD" ? "$" : "UGX"}
             value={plan.extra}
             onChange={(value) => onChange({ extra: value })}
-            error={"error" in extra ? extra.error : byField.extra_monthly}
+            onBlur={() => touched.touch("extra_monthly")}
+            error={
+              ("error" in extra && touched.isVisible("extra_monthly") ? extra.error : undefined) ||
+              byField.extra_monthly
+            }
             hint="Leave empty to see the effect of rolling payments over with no extra money."
           />
         </div>
@@ -96,9 +103,10 @@ export function PlanTab({ debts, plan, onChange, currency, disclaimer }: Props) 
           Avalanche and snowball, side by side
         </h2>
         <div role="status" aria-live="polite" className="mt-1 text-sm text-stone-700">
-          {built.debts === null && (
-            <span>
-              Some debts are missing details. Finish them on the{" "}
+          {built.incomplete.length > 0 && (
+            <span className="block">
+              {incompleteNote(built.incomplete.length)} Finish{" "}
+              {built.incomplete.length === 1 ? "it" : "them"} on the{" "}
               <a href="#debts" className="font-medium text-emerald-800 underline">
                 Debts tab
               </a>

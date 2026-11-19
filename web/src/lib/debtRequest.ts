@@ -1,6 +1,7 @@
 import type { DebtRequest } from "../api";
-import type { DebtInput } from "./storage";
-import { checkMoney, checkPercent, checkWhole } from "./validate";
+import type { DebtInput, TermUnit } from "./storage";
+import { checkTerm } from "./term";
+import { checkMoney, checkPercent } from "./validate";
 
 /** Categories the API accepts, with display labels. Credit cards are not offered. */
 export const CATEGORY_LABELS: Record<string, string> = {
@@ -11,54 +12,88 @@ export const CATEGORY_LABELS: Record<string, string> = {
   other: "Other",
 };
 
-export type BuiltDebts = {
-  /** Null while any debt is missing a required value or has a format error. */
-  debts: DebtRequest[] | null;
-  /** Format errors keyed by API field path, e.g. "debts[1].annual_rate". */
-  errors: Record<string, string>;
+/** The fields of one debt, named as the API names them. */
+export const DEBT_FIELDS = ["name", "category", "principal", "annual_rate", "term_months"] as const;
+export type DebtField = (typeof DEBT_FIELDS)[number];
+
+export const DEBT_MISSING: Record<DebtField, string> = {
+  name: "Enter a name for this debt.",
+  category: "Choose a type.",
+  principal: "Enter the balance you still owe.",
+  annual_rate: "Enter the interest rate.",
+  term_months: "Enter the time left to pay.",
 };
 
-/** Turn the Debts tab's rows into the API's debt list. No money math. */
+export type BuiltDebts = {
+  /** Complete debts only, ready for the API. Empty when none are complete. */
+  debts: DebtRequest[];
+  /** For each debt in `debts`, its index in the input rows (to map API errors back). */
+  rowIndex: number[];
+  /** Ids of debts that are missing something or have a format problem. */
+  incomplete: string[];
+  /** Problems keyed by debt id, then by API field name. */
+  problems: Record<string, Partial<Record<DebtField, string>>>;
+};
+
+/**
+ * Turn the Debts tab's rows into the API's debt list. Incomplete debts are left
+ * out, so the rest still calculate. No money math.
+ */
 export function buildDebts(rows: DebtInput[]): BuiltDebts {
-  const errors: Record<string, string> = {};
-  if (rows.length === 0) return { debts: null, errors };
-  let complete = true;
-  const debts: DebtRequest[] = [];
+  const built: BuiltDebts = { debts: [], rowIndex: [], incomplete: [], problems: {} };
   rows.forEach((row, i) => {
-    const path = `debts[${i}]`;
+    const problems: Partial<Record<DebtField, string>> = {};
     const balance = checkMoney(row.balance);
     const rate = checkPercent(row.ratePercent);
-    const term = checkWhole(row.termMonths);
-    if ("error" in balance) errors[`${path}.principal`] = balance.error;
-    if ("error" in rate) errors[`${path}.annual_rate`] = rate.error;
-    if ("error" in term) errors[`${path}.term_months`] = term.error;
-    if (!row.name.trim() || !row.category) complete = false;
-    if ("value" in balance && "value" in rate && "value" in term) {
-      debts.push({
+    const term = checkTerm(row.term, row.termUnit);
+    if (!row.name.trim()) problems.name = DEBT_MISSING.name;
+    if (!row.category) problems.category = DEBT_MISSING.category;
+    if ("error" in balance) problems.principal = balance.error;
+    else if ("missing" in balance) problems.principal = DEBT_MISSING.principal;
+    if ("error" in rate) problems.annual_rate = rate.error;
+    else if ("missing" in rate) problems.annual_rate = DEBT_MISSING.annual_rate;
+    if ("error" in term) problems.term_months = term.error;
+    else if ("missing" in term) problems.term_months = DEBT_MISSING.term_months;
+
+    built.problems[row.id] = problems;
+    if ("value" in balance && "value" in rate && "months" in term && !Object.keys(problems).length) {
+      built.debts.push({
         id: row.id,
         name: row.name,
         category: row.category,
         principal: balance.value,
         annual_rate: rate.value,
-        term_months: term.value,
+        term_months: term.months,
       });
+      built.rowIndex.push(i);
     } else {
-      complete = false;
+      built.incomplete.push(row.id);
     }
   });
-  return { debts: complete ? debts : null, errors };
+  return built;
+}
+
+/** "1 debt is incomplete and isn't included yet." */
+export function incompleteNote(count: number): string {
+  return count === 1
+    ? "1 debt is incomplete and isn't included yet."
+    : `${count} debts are incomplete and aren't included yet.`;
 }
 
 /**
- * The term to show after picking a category: the suggested term from /api/meta,
- * but only when the term field is empty. Never overwrites what the user typed.
+ * The time left after picking a type: the suggested term from /api/meta, but only
+ * when the field is empty. Never overwrites what the user typed. Shown in the
+ * user's chosen unit when it divides evenly, otherwise in months.
  */
 export function termAfterCategoryChange(
-  currentTerm: string,
-  suggested: number | null | undefined,
-): string {
-  if (currentTerm.trim() !== "" || suggested === null || suggested === undefined) {
-    return currentTerm;
+  current: { term: string; termUnit: TermUnit },
+  suggestedMonths: number | null | undefined,
+): { term: string; termUnit: TermUnit } {
+  if (current.term.trim() !== "" || suggestedMonths === null || suggestedMonths === undefined) {
+    return current;
   }
-  return String(suggested);
+  if (current.termUnit === "years" && suggestedMonths % 12 === 0) {
+    return { term: String(suggestedMonths / 12), termUnit: "years" };
+  }
+  return { term: String(suggestedMonths), termUnit: "months" };
 }

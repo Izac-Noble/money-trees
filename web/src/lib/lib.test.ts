@@ -91,7 +91,7 @@ function sample(): AppData {
       category: "auto",
       balance: "15000",
       ratePercent: "9",
-      termMonths: "60",
+      term: "60", termUnit: "months",
     },
   ];
   data.plan = { extra: "300" };
@@ -107,13 +107,39 @@ describe("local storage", () => {
   it("saves and reloads under one versioned key", () => {
     expect(saveData(sample())).toBe(true);
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
-    expect(raw.version).toBe(1);
+    expect(raw.version).toBe(2);
     expect(loadData()).toEqual(sample());
   });
 
   it("ignores data saved with a different schema version", () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, data: sample() }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 3, data: sample() }));
     expect(loadData()).toEqual(emptyData());
+  });
+
+  it("upgrades version 1 data, where debts stored months only", () => {
+    const v1 = {
+      version: 1,
+      data: {
+        currency: "USD",
+        loan: emptyData().loan,
+        debts: [
+          {
+            id: "c1",
+            name: "Car loan",
+            category: "auto",
+            balance: "15000",
+            ratePercent: "9",
+            termMonths: "60",
+          },
+        ],
+        plan: { extra: "300" },
+      },
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(v1));
+    const data = loadData();
+    expect(data.debts[0]).toMatchObject({ term: "60", termUnit: "months" });
+    expect(data.debtTermUnit).toBe("years");
+    expect(data.plan.extra).toBe("300");
   });
 
   it("ignores corrupt data", () => {
