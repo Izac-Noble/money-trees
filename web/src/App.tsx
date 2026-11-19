@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { fetchMeta, type Meta } from "./api";
 import { ConfirmDialog } from "./components/ConfirmDialog";
-import { CURRENCIES, isCurrency } from "./lib/format";
+import { CURRENCY } from "./lib/format";
 import {
   clearData,
   emptyData,
@@ -34,7 +34,7 @@ function tabFromHash(hash: string): TabId {
 function describe(data: AppData): string {
   const debts = `${data.debts.length} ${data.debts.length === 1 ? "debt" : "debts"}`;
   const loan = data.loan.amount ? "loan details" : "an empty loan form";
-  return `${loan}, ${debts}, the payoff plan extra and the currency (${data.currency})`;
+  return `${loan}, ${debts} and the payoff plan extra`;
 }
 
 /** FileReader rather than File.text(), which some older browsers lack. */
@@ -135,8 +135,15 @@ export default function App() {
     loan: (
       <LoanTab
         loan={data.loan}
-        onChange={(loan) => setData((d) => ({ ...d, loan }))}
-        currency={data.currency}
+        onChange={(loan) =>
+          setData((d) => ({
+            ...d,
+            loan,
+            // The time unit picked last anywhere becomes the default for new fields.
+            timeUnit: loan.termUnit !== d.loan.termUnit ? loan.termUnit : d.timeUnit,
+          }))
+        }
+        currency={CURRENCY}
         disclaimer={disclaimer}
       />
     ),
@@ -144,9 +151,9 @@ export default function App() {
       <DebtsTab
         debts={data.debts}
         onChange={(debts) => setData((d) => ({ ...d, debts }))}
-        termUnit={data.debtTermUnit}
-        onTermUnitChange={(debtTermUnit) => setData((d) => ({ ...d, debtTermUnit }))}
-        currency={data.currency}
+        termUnit={data.timeUnit}
+        onTermUnitChange={(timeUnit) => setData((d) => ({ ...d, timeUnit }))}
+        currency={CURRENCY}
         meta={meta}
         disclaimer={disclaimer}
       />
@@ -156,7 +163,7 @@ export default function App() {
         debts={data.debts}
         plan={data.plan}
         onChange={(plan) => setData((d) => ({ ...d, plan }))}
-        currency={data.currency}
+        currency={CURRENCY}
         disclaimer={disclaimer}
       />
     ),
@@ -171,26 +178,6 @@ export default function App() {
             See how loans and debt payoff choices play out over time.
           </p>
           <div className="mt-3 flex flex-wrap items-end gap-2">
-            <div>
-              <label htmlFor="currency" className="block text-xs font-medium">
-                Currency
-              </label>
-              <select
-                id="currency"
-                className="mt-1 rounded-lg border border-stone-300 bg-white px-2 py-2 text-sm"
-                value={data.currency}
-                onChange={(e) => {
-                  const currency = e.target.value;
-                  if (isCurrency(currency)) setData((d) => ({ ...d, currency }));
-                }}
-              >
-                {CURRENCIES.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </div>
             <button type="button" className="btn-secondary" onClick={exportData}>
               Export data
             </button>

@@ -93,13 +93,6 @@ describe("LoanTab", () => {
     );
   });
 
-  it("formats the same values for UGX", async () => {
-    mockApi({ "/api/amortization": () => ({ json: caseB }) });
-    render(<Harness initial={CASE_B_FORM} currency="UGX" />);
-    await waitFor(() => expect(card("Monthly payment")).toBe("UGX 1,199"));
-    expect(card("Total interest")).toBe("UGX 231,677");
-  });
-
   it("shows savings and two chart lines when extras are used", async () => {
     const fetchMock = mockApi({
       "/api/amortization": (body) => ({

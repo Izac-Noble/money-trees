@@ -8,7 +8,7 @@ import {
 import { LineChart } from "../components/LineChart";
 import { TextField } from "../components/fields";
 import { buildDebts, incompleteNote } from "../lib/debtRequest";
-import { formatDuration, formatMoney, type Currency } from "../lib/format";
+import { currencySymbol, formatDuration, formatMoney, type Currency } from "../lib/format";
 import type { DebtInput, PlanInput } from "../lib/storage";
 import { splitErrors, useCalculation } from "../lib/useCalculation";
 import { useTouched } from "../lib/useTouched";
@@ -76,7 +76,7 @@ export function PlanTab({ debts, plan, onChange, currency, disclaimer }: Props) 
           <TextField
             id="plan-extra"
             label="Extra money per month"
-            prefix={currency === "USD" ? "$" : "UGX"}
+            prefix={currencySymbol(currency)}
             value={plan.extra}
             onChange={(value) => onChange({ extra: value })}
             onBlur={() => touched.touch("extra_monthly")}

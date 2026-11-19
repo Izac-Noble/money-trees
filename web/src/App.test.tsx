@@ -67,11 +67,20 @@ describe("App shell", () => {
     expect(loan).toHaveFocus();
   });
 
-  it("saves the currency setting", () => {
+  it("remembers the last time unit picked, for every tab", () => {
     mockApi();
     render(<App />);
-    fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "UGX" } });
-    expect(loadData().currency).toBe("UGX");
+    fireEvent.click(screen.getByRole("button", { name: "Months" }));
+    expect(loadData().timeUnit).toBe("months");
+    fireEvent.click(screen.getByRole("tab", { name: "Debts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add debt" }));
+    expect(screen.getByRole("button", { name: "Months" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("has no currency setting: USD only", () => {
+    mockApi();
+    render(<App />);
+    expect(screen.queryByLabelText("Currency")).not.toBeInTheDocument();
   });
 
   it("works when storage is unavailable", () => {

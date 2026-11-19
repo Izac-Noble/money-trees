@@ -3,8 +3,9 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Currency } from "../lib/format";
 import type { DebtInput, PlanInput } from "../lib/storage";
-import { THREE_DEBTS } from "../test/debts";
+import { CARD, THREE_DEBTS } from "../test/debts";
 import caseM from "../test/fixtures/compare-case-m.json";
+import caseWX from "../test/fixtures/compare-case-wx.json";
 import { mockApi, sentBodies } from "../test/mockApi";
 import { PlanTab } from "./PlanTab";
 
@@ -103,6 +104,7 @@ describe("PlanTab", () => {
             id: "p1",
             name: "Personal loan",
             category: "personal",
+            payment_mode: "fixed_term",
             principal: "3000",
             annual_rate: "0.04",
             term_months: 24,
@@ -111,6 +113,7 @@ describe("PlanTab", () => {
             id: "c1",
             name: "Car loan",
             category: "auto",
+            payment_mode: "fixed_term",
             principal: "15000",
             annual_rate: "0.09",
             term_months: 60,
@@ -119,6 +122,7 @@ describe("PlanTab", () => {
             id: "s1",
             name: "Student loan",
             category: "student",
+            payment_mode: "fixed_term",
             principal: "20000",
             annual_rate: "0.06",
             term_months: 120,
@@ -127,6 +131,34 @@ describe("PlanTab", () => {
         extra_monthly: "300",
       },
     ]);
+  });
+
+  it("shows cases W and X with the credit card", async () => {
+    const fetchMock = mockApi({ "/api/strategies/compare": () => ({ json: caseWX }) });
+    render(<Harness debts={[...THREE_DEBTS, CARD]} />);
+    await waitFor(() => expect(cell("Total interest", "Avalanche")).toBe("$5,950.62"));
+    expect(cell("Total interest", "Snowball")).toBe("$6,384.27");
+    expect(cell("Interest saved", "Avalanche")).toBe("$6,504.01");
+    expect(cell("Interest saved", "Snowball")).toBe("$6,070.36");
+    expect(cell("Time saved", "Avalanche")).toBe("6 years 5 months");
+    const avalanche = screen.getByRole("list", { name: "avalanche payoff order" });
+    expect(within(avalanche).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Credit card, month 12",
+      "Personal loan, month 24",
+      "Car loan, month 28",
+      "Student loan, month 43",
+    ]);
+    const snowball = screen.getByRole("list", { name: "snowball payoff order" });
+    expect(within(snowball).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Personal loan, month 8",
+      "Credit card, month 15",
+      "Car loan, month 28",
+      "Student loan, month 43",
+    ]);
+    const [sent] = sentBodies(fetchMock, "/api/strategies/compare") as {
+      debts: Record<string, unknown>[];
+    }[];
+    expect(sent?.debts[3]).toMatchObject({ payment_mode: "fixed_payment", monthly_payment: "200" });
   });
 
   it("explains each strategy in neutral words", async () => {
@@ -149,12 +181,6 @@ describe("PlanTab", () => {
     expect(screen.getByText(/No extra money \(balance reaches 0 in month 120\)/)).toBeVisible();
     expect(screen.getByText(/Avalanche \(balance reaches 0 in month 45\)/)).toBeVisible();
     expect(screen.getByText(/Snowball \(balance reaches 0 in month 45\)/)).toBeVisible();
-  });
-
-  it("formats values for UGX", async () => {
-    mockApi({ "/api/strategies/compare": () => ({ json: caseM }) });
-    render(<Harness currency="UGX" />);
-    await waitFor(() => expect(cell("Total interest", "Avalanche")).toBe("UGX 5,005"));
   });
 
   it("sends 0 when the extra amount is left empty", async () => {

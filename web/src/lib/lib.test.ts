@@ -47,11 +47,9 @@ describe("formatMoney", () => {
     expect(formatMoney("12345678901234567.89", "USD")).toBe("$12,345,678,901,234,567.89");
   });
 
-  it("shows UGX with no decimal places, rounding half up", () => {
-    expect(formatMoney("1199.10", "UGX")).toBe("UGX 1,199");
-    expect(formatMoney("1199.50", "UGX")).toBe("UGX 1,200");
-    expect(formatMoney("999999.99", "UGX")).toBe("UGX 1,000,000");
-    expect(formatMoney("0.00", "UGX")).toBe("UGX 0");
+  it("defaults to USD, the only currency for now", () => {
+    expect(formatMoney("863.69")).toBe("$863.69");
+    expect(formatMoney("5")).toBe("$5.00");
   });
 
   it("keeps negative values", () => {
@@ -82,7 +80,7 @@ describe("em dash check", () => {
 
 function sample(): AppData {
   const data = emptyData();
-  data.currency = "UGX";
+  data.timeUnit = "months";
   data.loan = { ...data.loan, amount: "200000", ratePercent: "6", term: "30" };
   data.debts = [
     {
@@ -91,7 +89,23 @@ function sample(): AppData {
       category: "auto",
       balance: "15000",
       ratePercent: "9",
-      term: "60", termUnit: "months",
+      paymentMode: "fixed_term",
+      modeChosen: true,
+      term: "60",
+      termUnit: "months",
+      monthlyPayment: "",
+    },
+    {
+      id: "cc",
+      name: "Card",
+      category: "credit_card",
+      balance: "5000",
+      ratePercent: "24",
+      paymentMode: "fixed_payment",
+      modeChosen: true,
+      term: "3",
+      termUnit: "years",
+      monthlyPayment: "200",
     },
   ];
   data.plan = { extra: "300" };
@@ -107,12 +121,12 @@ describe("local storage", () => {
   it("saves and reloads under one versioned key", () => {
     expect(saveData(sample())).toBe(true);
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
-    expect(raw.version).toBe(2);
+    expect(raw.version).toBe(3);
     expect(loadData()).toEqual(sample());
   });
 
   it("ignores data saved with a different schema version", () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 3, data: sample() }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 4, data: sample() }));
     expect(loadData()).toEqual(emptyData());
   });
 
@@ -137,9 +151,43 @@ describe("local storage", () => {
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(v1));
     const data = loadData();
-    expect(data.debts[0]).toMatchObject({ term: "60", termUnit: "months" });
-    expect(data.debtTermUnit).toBe("years");
+    expect(data.debts[0]).toMatchObject({
+      term: "60",
+      termUnit: "months",
+      paymentMode: "fixed_term",
+      modeChosen: true,
+      monthlyPayment: "",
+    });
+    expect(data.timeUnit).toBe("years");
     expect(data.plan.extra).toBe("300");
+  });
+
+  it("upgrades version 2 data and keeps the last time unit", () => {
+    const v2 = {
+      version: 2,
+      data: {
+        currency: "UGX",
+        loan: emptyData().loan,
+        debts: [
+          {
+            id: "c1",
+            name: "Car loan",
+            category: "auto",
+            balance: "15000",
+            ratePercent: "9",
+            term: "5",
+            termUnit: "years",
+          },
+        ],
+        debtTermUnit: "months",
+        plan: { extra: "" },
+      },
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(v2));
+    const data = loadData();
+    expect(data.debts[0]).toMatchObject({ term: "5", termUnit: "years", paymentMode: "fixed_term" });
+    expect(data.timeUnit).toBe("months");
+    expect("currency" in data).toBe(false);
   });
 
   it("ignores corrupt data", () => {
@@ -164,8 +212,10 @@ describe("local storage", () => {
 
   it("validates saved files", () => {
     expect(parseSaved(toSaved(sample()))).toEqual(sample());
-    expect(parseSaved({ version: 1, data: { ...sample(), currency: "EUR" } })).toBeNull();
-    expect(parseSaved({ version: 1, data: { ...sample(), debts: [{ id: 1 }] } })).toBeNull();
+    expect(parseSaved({ version: 3, data: { ...sample(), timeUnit: "weeks" } })).toBeNull();
+    expect(parseSaved({ version: 3, data: { ...sample(), debts: [{ id: 1 }] } })).toBeNull();
+    const badMode = { ...sample().debts[0], paymentMode: "minimum" };
+    expect(parseSaved({ version: 3, data: { ...sample(), debts: [badMode] } })).toBeNull();
     expect(parseSaved({ version: 1 })).toBeNull();
     expect(parseSaved(null)).toBeNull();
   });

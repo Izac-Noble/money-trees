@@ -9,7 +9,7 @@ import { LineChart, type Series } from "../components/LineChart";
 import { balancesFromSchedule } from "../lib/chart";
 import { buildLoanRequest } from "../lib/loanRequest";
 import { SummaryCard, TermField, TextField } from "../components/fields";
-import { formatDuration, formatMoney, type Currency } from "../lib/format";
+import { currencySymbol, formatDuration, formatMoney, type Currency } from "../lib/format";
 import { newKey, type LoanInput } from "../lib/storage";
 import { useDebounced } from "../lib/useDebounced";
 import { useTouched } from "../lib/useTouched";
@@ -90,7 +90,7 @@ export function LoanTab({ loan, onChange, currency, disclaimer }: Props) {
     (touched.isVisible(touchKey) ? built.errors[field] : undefined) || apiErrors[field];
   const set = (patch: Partial<LoanInput>) => onChange({ ...loan, ...patch });
   const money = (v: string) => formatMoney(v, currency);
-  const symbol = currency === "USD" ? "$" : "UGX";
+  const symbol = currencySymbol(currency);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">

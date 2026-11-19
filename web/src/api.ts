@@ -11,7 +11,13 @@ export type Health = {
 export type Meta = {
   engine_version: string;
   disclaimer: string;
-  categories: { value: string; suggested_term_months: number | null }[];
+  categories: {
+    value: string;
+    label: string;
+    default_payment_mode: "fixed_term" | "fixed_payment";
+    suggested_term_months: number | null;
+  }[];
+  payment_modes: string[];
   strategies: string[];
   limits: {
     max_debts: number;
@@ -33,6 +39,8 @@ export type ScheduleRow = {
 
 export type AmortizationResponse = {
   engine_version: string;
+  /** Limits the UI must show (credit cards). Empty otherwise. */
+  notes: string[];
   summary: {
     payment: string;
     payoff_month: number;
@@ -56,10 +64,10 @@ export type DebtRequest = {
   id: string;
   name: string;
   category: string;
+  payment_mode: "fixed_term" | "fixed_payment";
   principal: string;
   annual_rate: string;
-  term_months: number;
-};
+} & ({ term_months: number } | { monthly_payment: string });
 
 export type TimelineRow = {
   month: number;
@@ -75,6 +83,7 @@ export type DebtsResponse = {
     id: string;
     name: string;
     category: string;
+    payment_mode: "fixed_term" | "fixed_payment";
   } & Omit<AmortizationResponse, "engine_version">)[];
   summary: {
     total_starting_balance: string;
@@ -98,7 +107,14 @@ export type StrategyResponse = {
   payoff_order: string[];
   interest_saved: string;
   months_saved: number;
-  debts: { id: string; name: string; category: string; payoff_month: number; total_interest: string }[];
+  debts: {
+    id: string;
+    name: string;
+    category: string;
+    payoff_month: number;
+    total_interest: string;
+    notes: string[];
+  }[];
   timeline: (TimelineRow & { leftover_applied: string; leftover_recipients: string[] })[];
   baseline: {
     total_interest: string;
@@ -120,7 +136,12 @@ export type CompareResponse = {
   };
 };
 
-export type FieldError = { field: string | null; message: string };
+export type FieldError = {
+  field: string | null;
+  message: string;
+  /** Spec 3b: the first month's interest, when a payment is too small. */
+  min_interest?: string;
+};
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; errors: FieldError[] };
 
