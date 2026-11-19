@@ -229,17 +229,23 @@ def test_meta(client: TestClient) -> None:
     assert body["disclaimer"] == DISCLAIMER
     assert DISCLAIMER == "Estimates for learning and planning, not financial advice."
     assert body["categories"] == [
-        {"value": v, "label": label, "default_payment_mode": mode, "suggested_term_months": term}
-        for v, label, mode, term in [
-            ("mortgage", "Mortgage", "fixed_term", 360),
-            ("auto", "Car loan", "fixed_term", 60),
-            ("student", "Student loan", "fixed_term", 120),
-            ("personal", "Personal loan", "fixed_term", 36),
-            ("credit_card", "Credit card", "fixed_payment", None),
-            ("medical", "Medical debt", "fixed_payment", None),
-            ("family_friend", "Loan from family or friends", "fixed_payment", None),
-            ("tax", "Tax debt", "fixed_payment", None),
-            ("other", "Other", "fixed_payment", None),
+        {
+            "value": v,
+            "label": label,
+            "default_payment_mode": mode,
+            "suggested_term_months": term,
+            "expense_category": expense,
+        }
+        for v, label, mode, term, expense in [
+            ("mortgage", "Mortgage", "fixed_term", 360, "mortgage"),
+            ("auto", "Car loan", "fixed_term", 60, "car_payment"),
+            ("student", "Student loan", "fixed_term", 120, "student_loan"),
+            ("personal", "Personal loan", "fixed_term", 36, "personal_loan"),
+            ("credit_card", "Credit card", "fixed_payment", None, "credit_cards"),
+            ("medical", "Medical debt", "fixed_payment", None, "other_debt"),
+            ("family_friend", "Loan from family or friends", "fixed_payment", None, "other_debt"),
+            ("tax", "Tax debt", "fixed_payment", None, "other_debt"),
+            ("other", "Other", "fixed_payment", None, "other_debt"),
         ]
     ]
     assert body["payment_modes"] == ["fixed_term", "fixed_payment"]

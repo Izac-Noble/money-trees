@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { postDebts, type DebtRequest, type DebtsResponse, type Meta } from "../api";
 import { LineChart } from "../components/LineChart";
+import { OwnerPicker } from "../components/OwnerPicker";
 import { FieldMessage, SummaryCard, TermField, TextField } from "../components/fields";
 import {
   DEBT_FIELDS,
@@ -12,7 +13,14 @@ import {
   type DebtField,
 } from "../lib/debtRequest";
 import { currencySymbol, formatDuration, formatMoney, type Currency } from "../lib/format";
-import { newDebt, newKey, type DebtInput, type PaymentMode, type TermUnit } from "../lib/storage";
+import {
+  newDebt,
+  newKey,
+  type DebtInput,
+  type HouseholdKind,
+  type PaymentMode,
+  type TermUnit,
+} from "../lib/storage";
 import { splitErrors, useCalculation } from "../lib/useCalculation";
 import { useTouched } from "../lib/useTouched";
 
@@ -45,6 +53,8 @@ type Props = {
   currency: Currency;
   meta: Meta | null;
   disclaimer: string;
+  /** From the Household tab: couples get a "Whose?" picker on each debt. */
+  household?: { kind: HouseholdKind; names: [string, string] };
 };
 
 export function DebtsTab({
@@ -55,6 +65,7 @@ export function DebtsTab({
   currency,
   meta,
   disclaimer,
+  household,
 }: Props) {
   const built = useMemo(() => buildDebts(debts), [debts]);
   const requestKey = built.debts.length ? JSON.stringify(built.debts) : "";
@@ -274,6 +285,15 @@ export function DebtsTab({
                       onChange={(monthlyPayment) =>
                         update(debt.id, { monthlyPayment, modeChosen: true })
                       }
+                    />
+                  )}
+                  {household?.kind === "couple" && (
+                    <OwnerPicker
+                      id={`debt-${debt.id}-owner`}
+                      value={debt.owner}
+                      onChange={(owner) => update(debt.id, { owner })}
+                      names={household.names}
+                      itemLabel={label}
                     />
                   )}
                   <button

@@ -3,6 +3,7 @@ import { EM_DASH, findEmDashes } from "./emdash";
 import { formatDuration, formatMoney } from "./format";
 import { fractionToPercent, percentToFraction } from "./percent";
 import {
+  LEGACY_STORAGE_KEY,
   STORAGE_KEY,
   clearData,
   emptyData,
@@ -94,6 +95,7 @@ function sample(): AppData {
       term: "60",
       termUnit: "months",
       monthlyPayment: "",
+      owner: "p1",
     },
     {
       id: "cc",
@@ -106,6 +108,7 @@ function sample(): AppData {
       term: "3",
       termUnit: "years",
       monthlyPayment: "200",
+      owner: "joint",
     },
   ];
   data.plan = { extra: "300" };
@@ -121,12 +124,12 @@ describe("local storage", () => {
   it("saves and reloads under one versioned key", () => {
     expect(saveData(sample())).toBe(true);
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
-    expect(raw.version).toBe(3);
+    expect(raw.version).toBe(4);
     expect(loadData()).toEqual(sample());
   });
 
   it("ignores data saved with a different schema version", () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 4, data: sample() }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 5, data: sample() }));
     expect(loadData()).toEqual(emptyData());
   });
 
@@ -190,6 +193,50 @@ describe("local storage", () => {
     expect("currency" in data).toBe(false);
   });
 
+  it("moves money-trees:v1 to money-trees:v2 without losing debts or the loan form", () => {
+    const v3 = {
+      version: 3,
+      data: {
+        loan: { ...emptyData().loan, amount: "200000", ratePercent: "6", term: "30" },
+        debts: [{ ...sample().debts[1], owner: undefined }],
+        timeUnit: "months",
+        plan: { extra: "300" },
+      },
+    };
+    localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(v3));
+    const data = loadData();
+    expect(data.loan.amount).toBe("200000");
+    expect(data.debts).toHaveLength(1);
+    expect(data.debts[0]).toMatchObject({ id: "cc", monthlyPayment: "200", owner: "joint" });
+    expect(data.plan.extra).toBe("300");
+    expect(data.timeUnit).toBe("months");
+    expect(data.household).toEqual(emptyData().household);
+    expect(localStorage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null").version).toBe(4);
+  });
+
+  it("prefers money-trees:v2 when both keys exist", () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSaved(sample())));
+    localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(toSaved(emptyData())));
+    expect(loadData()).toEqual(sample());
+  });
+
+  it("saves and reloads the household", () => {
+    const data = sample();
+    data.household = {
+      kind: "couple",
+      names: ["Sam", "Alex"],
+      incomes: [{ key: "i1", label: "Sam's job", amount: "2000", frequency: "biweekly", owner: "p1" }],
+      expenses: { housing: { amount: "1500", frequency: "monthly", owner: "joint" } },
+      customExpenses: [
+        { key: "c1", label: "Gym", amount: "40", frequency: "monthly", owner: "p2" },
+      ],
+      assets: [{ key: "a1", type: "cash", label: "", value: "4000", owner: "joint" }],
+    };
+    saveData(data);
+    expect(loadData()).toEqual(data);
+  });
+
   it("ignores corrupt data", () => {
     localStorage.setItem(STORAGE_KEY, "{not json");
     expect(loadData()).toEqual(emptyData());
@@ -212,10 +259,10 @@ describe("local storage", () => {
 
   it("validates saved files", () => {
     expect(parseSaved(toSaved(sample()))).toEqual(sample());
-    expect(parseSaved({ version: 3, data: { ...sample(), timeUnit: "weeks" } })).toBeNull();
-    expect(parseSaved({ version: 3, data: { ...sample(), debts: [{ id: 1 }] } })).toBeNull();
+    expect(parseSaved({ version: 4, data: { ...sample(), timeUnit: "weeks" } })).toBeNull();
+    expect(parseSaved({ version: 4, data: { ...sample(), debts: [{ id: 1 }] } })).toBeNull();
     const badMode = { ...sample().debts[0], paymentMode: "minimum" };
-    expect(parseSaved({ version: 3, data: { ...sample(), debts: [badMode] } })).toBeNull();
+    expect(parseSaved({ version: 4, data: { ...sample(), debts: [badMode] } })).toBeNull();
     expect(parseSaved({ version: 1 })).toBeNull();
     expect(parseSaved(null)).toBeNull();
   });
