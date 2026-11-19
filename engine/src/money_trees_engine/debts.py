@@ -135,6 +135,8 @@ class Debt:
     lump_sums: tuple[LumpSum, ...] = field(default_factory=tuple)
     payment_mode: PaymentMode | str = PaymentMode.FIXED_TERM
     monthly_payment: Decimal | None = None
+    # Spec 6: whose debt this is ("p1", "p2" or "joint"). Checked by the household.
+    owner: str = "p1"
 
 
 @dataclass(frozen=True)
