@@ -202,3 +202,16 @@ export function reassignToFirstPerson(data: AppData): AppData {
     debts: data.debts.map(p1),
   };
 }
+
+/** Nothing entered anywhere yet. */
+export function isEmpty(data: AppData): boolean {
+  const h = data.household;
+  return (
+    !h.names.some((n) => n.trim()) &&
+    h.incomes.length === 0 &&
+    h.customExpenses.length === 0 &&
+    h.assets.length === 0 &&
+    !Object.values(h.expenses).some((e) => e.amount.trim()) &&
+    data.debts.length === 0
+  );
+}
