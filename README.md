@@ -39,6 +39,29 @@ cd api && uv lock --check && ruff check . && ruff format --check . && mypy src t
 cd web && npm run lint && npm run typecheck && npm test && npm run build
 ```
 
+## API
+
+FastAPI under `/api`. It validates input, calls the engine and returns JSON. It does no
+math and stores nothing. Request and response bodies are never logged; only method,
+path, status and duration are. Interactive docs are at `/api/docs`.
+
+| Method | Path | What it returns |
+| --- | --- | --- |
+| GET | `/api/health` | Status, `APP_ENV`, engine version |
+| GET | `/api/meta` | Categories with suggested terms, input limits, engine version, disclaimer |
+| POST | `/api/amortization` | One loan's summary and schedule (Spec 1) |
+| POST | `/api/debts` | Each debt plus the combined picture (Spec 2) |
+| POST | `/api/strategies` | One payoff strategy: avalanche, snowball or custom (Spec 3) |
+| POST | `/api/strategies/compare` | Avalanche and snowball side by side (Spec 3) |
+
+- Money and rates are **strings** (`"200000"`, `"0.06"`), never JSON numbers. Money takes up
+  to 2 decimal places, rates up to 6. Months and counts are integers.
+- Every money value in a response has exactly 2 decimal places (`"1199.10"`).
+- Every POST response includes `engine_version`.
+- Errors are `{"errors": [{"field": "debts[1].annual_rate", "message": "..."}]}`, listing every
+  invalid field: 400 for malformed JSON, 413 over 100 KB, 422 for invalid input, and a
+  generic 500 with no details.
+
 ## Deploying
 
 Everything deploys as **one Vercel project** using
