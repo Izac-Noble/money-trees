@@ -122,7 +122,7 @@ describe("LoanTab", () => {
     vi.useFakeTimers();
     const fetchMock = mockApi({ "/api/amortization": () => ({ json: caseB }) });
     render(<Harness initial={{ ...CASE_B_FORM, amount: "" }} />);
-    const amount = screen.getByLabelText("Loan amount");
+    const amount = screen.getByLabelText(/^Loan amount/);
     for (const value of ["2", "20", "200000"]) {
       fireEvent.change(amount, { target: { value } });
       vi.advanceTimersByTime(100);
@@ -156,13 +156,93 @@ describe("LoanTab", () => {
         }}
       />,
     );
-    const rate = screen.getByLabelText("Interest rate (%)");
+    const rate = screen.getByLabelText(/^Interest rate \(%\)/);
     await waitFor(() => expect(rate).toHaveAttribute("aria-invalid", "true"));
     expect(rate).toHaveAccessibleDescription(/Rate must be below 1 \(100%\)\./);
     expect(screen.getByLabelText("Month, lump sum 1")).toHaveAccessibleDescription(
       /Month must be within the term/,
     );
     expect(screen.getByRole("status")).toHaveTextContent(/Some details need fixing/);
+  });
+
+  it("shows no errors on a new, empty form", () => {
+    mockApi();
+    render(<Harness />);
+    expect(screen.queryByText(/Error:/)).not.toBeInTheDocument();
+    for (const input of screen.getAllByRole("textbox")) {
+      expect(input).not.toHaveAttribute("aria-invalid");
+    }
+  });
+
+  it("marks required fields up front", () => {
+    mockApi();
+    render(<Harness />);
+    expect(screen.getByLabelText(/^Loan amount/)).toHaveAccessibleName("Loan amount (required)");
+    expect(screen.getByLabelText(/^Loan amount/)).toHaveAttribute("aria-required", "true");
+    expect(screen.getByRole("textbox", { name: "Term (required)" })).toHaveAttribute("aria-required", "true");
+  });
+
+  it("doesn't show an error while typing for the first time", () => {
+    mockApi();
+    render(<Harness />);
+    const amount = screen.getByLabelText(/^Loan amount/);
+    fireEvent.change(amount, { target: { value: "12.345" } });
+    expect(amount).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("shows a missing field's error after leaving it, then clears it while typing", () => {
+    mockApi();
+    render(<Harness />);
+    const amount = screen.getByLabelText(/^Loan amount/);
+    fireEvent.blur(amount);
+    expect(amount).toHaveAttribute("aria-invalid", "true");
+    expect(amount).toHaveAccessibleDescription("Error: Enter the loan amount.");
+
+    fireEvent.change(amount, { target: { value: "12.345" } });
+    expect(amount).toHaveAccessibleDescription(/Enter an amount like/);
+    fireEvent.change(amount, { target: { value: "1000" } });
+    expect(amount).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByText(/Enter the loan amount/)).not.toBeInTheDocument();
+    // Other fields the user never left stay quiet.
+    expect(screen.getByLabelText(/^Interest rate/)).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("shows the term conversion and switches units with the toggle", async () => {
+    const fetchMock = mockApi({ "/api/amortization": () => ({ json: caseB }) });
+    render(<Harness initial={{ ...CASE_B_FORM, term: "4" }} />);
+    const term = screen.getByRole("textbox", { name: "Term (required)" });
+    expect(term).toHaveAccessibleDescription("= 48 months");
+    const years = screen.getByRole("button", { name: "Years" });
+    const months = screen.getByRole("button", { name: "Months" });
+    expect(years).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.change(term, { target: { value: "4.5" } });
+    fireEvent.blur(term);
+    expect(term).toHaveAccessibleDescription(
+      "Error: Use whole years, or switch to Months for anything in between.",
+    );
+    fireEvent.click(months);
+    expect(months).toHaveAttribute("aria-pressed", "true");
+    fireEvent.change(term, { target: { value: "54" } });
+    expect(term).toHaveAccessibleDescription("= 4 years 6 months");
+    await waitFor(() =>
+      expect(
+        (sentBodies(fetchMock, "/api/amortization") as { term_months: number }[]).map(
+          (b) => b.term_months,
+        ),
+      ).toContain(54),
+    );
+  });
+
+  it("keeps a new lump sum row quiet until a field is left", () => {
+    mockApi();
+    render(<Harness initial={CASE_B_FORM} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add a lump sum" }));
+    const month = screen.getByLabelText("Month, lump sum 1");
+    expect(month).not.toHaveAttribute("aria-invalid");
+    fireEvent.blur(month);
+    expect(month).toHaveAccessibleDescription("Error: Enter the month for this lump sum.");
+    expect(screen.getByLabelText("Amount, lump sum 1")).not.toHaveAttribute("aria-invalid");
   });
 
   it("adds and removes lump sum rows", () => {

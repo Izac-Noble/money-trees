@@ -8,10 +8,11 @@ import {
 import { LineChart, type Series } from "../components/LineChart";
 import { balancesFromSchedule } from "../lib/chart";
 import { buildLoanRequest } from "../lib/loanRequest";
-import { FieldMessage, SummaryCard, TextField } from "../components/fields";
+import { SummaryCard, TermField, TextField } from "../components/fields";
 import { formatDuration, formatMoney, type Currency } from "../lib/format";
 import { newKey, type LoanInput } from "../lib/storage";
 import { useDebounced } from "../lib/useDebounced";
+import { useTouched } from "../lib/useTouched";
 
 const FIRST_MONTHS = 12;
 
@@ -83,75 +84,61 @@ export function LoanTab({ loan, onChange, currency, disclaimer }: Props) {
       else generalErrors.push(e.message);
     }
   }
-  const errorFor = (field: string) => built.errors[field] ?? apiErrors[field];
+  const touched = useTouched();
+  /** Local problems show only after the field was left; API errors always show. */
+  const errorFor = (field: string, touchKey: string = field) =>
+    (touched.isVisible(touchKey) ? built.errors[field] : undefined) || apiErrors[field];
   const set = (patch: Partial<LoanInput>) => onChange({ ...loan, ...patch });
   const money = (v: string) => formatMoney(v, currency);
   const symbol = currency === "USD" ? "$" : "UGX";
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
-      <form className="space-y-4" onSubmit={(e) => e.preventDefault()} aria-label="Loan details">
+      <form
+        className="space-y-4"
+        onSubmit={(e) => e.preventDefault()}
+        aria-label="Loan details"
+        noValidate
+      >
         <TextField
           id="loan-amount"
           label="Loan amount"
+          required
           prefix={symbol}
           value={loan.amount}
           onChange={(amount) => set({ amount })}
+          onBlur={() => touched.touch("principal")}
           error={errorFor("principal")}
         />
         <TextField
           id="loan-rate"
           label="Interest rate (%)"
+          required
           suffix="%"
           value={loan.ratePercent}
           onChange={(ratePercent) => set({ ratePercent })}
+          onBlur={() => touched.touch("annual_rate")}
           error={errorFor("annual_rate")}
-          hint="Yearly rate, for example 6.5"
+          hint="The yearly rate, for example 6.5."
         />
-        <fieldset>
-          <legend className="text-sm font-medium">Term</legend>
-          <div className="mt-1 flex gap-2">
-            <div className="flex-1">
-              <label htmlFor="loan-term" className="sr-only">
-                Term length
-              </label>
-              <input
-                id="loan-term"
-                type="text"
-                inputMode="numeric"
-                autoComplete="off"
-                className={`w-full rounded-lg border bg-white px-3 py-2 ${
-                  errorFor("term_months") ? "border-red-700" : "border-stone-300"
-                }`}
-                value={loan.term}
-                aria-invalid={errorFor("term_months") ? true : undefined}
-                aria-describedby={errorFor("term_months") ? "loan-term-error" : undefined}
-                onChange={(e) => set({ term: e.target.value })}
-              />
-            </div>
-            <label htmlFor="loan-term-unit" className="sr-only">
-              Term unit
-            </label>
-            <select
-              id="loan-term-unit"
-              className="rounded-lg border border-stone-300 bg-white px-2 py-2"
-              value={loan.termUnit}
-              onChange={(e) => set({ termUnit: e.target.value === "months" ? "months" : "years" })}
-            >
-              <option value="years">years</option>
-              <option value="months">months</option>
-            </select>
-          </div>
-          {errorFor("term_months") && (
-            <FieldMessage id="loan-term-error">{errorFor("term_months")}</FieldMessage>
-          )}
-        </fieldset>
+        <TermField
+          id="loan-term"
+          label="Term"
+          required
+          value={loan.term}
+          unit={loan.termUnit}
+          onChange={(term) => set({ term })}
+          onUnitChange={(termUnit) => set({ termUnit })}
+          onBlur={() => touched.touch("term_months")}
+          error={errorFor("term_months")}
+        />
         <TextField
           id="loan-extra"
           label="Extra monthly payment (optional)"
           prefix={symbol}
           value={loan.extra}
           onChange={(extra) => set({ extra })}
+          onBlur={() => touched.touch("extra_monthly")}
           error={errorFor("extra_monthly")}
         />
         <fieldset className="space-y-3">
@@ -169,7 +156,8 @@ export function LoanTab({ loan, onChange, currency, disclaimer }: Props) {
                       lumpSums: loan.lumpSums.map((r) => (r.key === row.key ? { ...r, month } : r)),
                     })
                   }
-                  error={errorFor(`lump_sums[${i}].month`)}
+                  onBlur={() => touched.touch(`lump:${row.key}:month`)}
+                  error={errorFor(`lump_sums[${i}].month`, `lump:${row.key}:month`)}
                 />
               </div>
               <div className="min-w-0 flex-1">
@@ -185,7 +173,8 @@ export function LoanTab({ loan, onChange, currency, disclaimer }: Props) {
                       ),
                     })
                   }
-                  error={errorFor(`lump_sums[${i}].amount`)}
+                  onBlur={() => touched.touch(`lump:${row.key}:amount`)}
+                  error={errorFor(`lump_sums[${i}].amount`, `lump:${row.key}:amount`)}
                 />
               </div>
               <button
