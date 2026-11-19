@@ -17,6 +17,8 @@ type Props = {
   title: string;
   description: string;
   series: Series[];
+  /** The month that values[0] belongs to. 0 when values start with the starting balance. */
+  startMonth?: number;
 };
 
 const WIDTH = 640;
@@ -27,13 +29,14 @@ const PAD = { top: 12, right: 12, bottom: 28, left: 12 };
  * A small responsive SVG line chart of balances by month. Strings are converted to
  * numbers for plotting only; values shown as text come straight from the API.
  */
-export function LineChart({ title, description, series }: Props) {
+export function LineChart({ title, description, series, startMonth = 0 }: Props) {
   const id = useId();
-  const lastMonth = Math.max(1, ...series.map((s) => s.values.length - 1));
+  const lastMonth = Math.max(startMonth + 1, ...series.map((s) => startMonth + s.values.length - 1));
   const peak = Math.max(1, ...series.flatMap((s) => s.values.map(toPlotNumber)));
   const plotW = WIDTH - PAD.left - PAD.right;
   const plotH = HEIGHT - PAD.top - PAD.bottom;
-  const x = (month: number) => PAD.left + (plotW * month) / lastMonth;
+  const x = (month: number) =>
+    PAD.left + (plotW * (month - startMonth)) / (lastMonth - startMonth);
   const y = (v: number) => PAD.top + plotH - (plotH * v) / peak;
 
   return (
@@ -57,7 +60,9 @@ export function LineChart({ title, description, series }: Props) {
         {series.map((s) => (
           <polyline
             key={s.label}
-            points={s.values.map((v, month) => `${x(month)},${y(toPlotNumber(v))}`).join(" ")}
+            points={s.values
+              .map((v, i) => `${x(startMonth + i)},${y(toPlotNumber(v))}`)
+              .join(" ")}
             fill="none"
             stroke={s.color}
             strokeWidth={2.5}
@@ -66,7 +71,7 @@ export function LineChart({ title, description, series }: Props) {
           />
         ))}
         <text x={PAD.left} y={HEIGHT - 8} fontSize={12} fill="#57534e">
-          Month 0
+          Month {startMonth}
         </text>
         <text x={WIDTH - PAD.right} y={HEIGHT - 8} fontSize={12} fill="#57534e" textAnchor="end">
           Month {lastMonth}
@@ -86,7 +91,7 @@ export function LineChart({ title, description, series }: Props) {
                 strokeDasharray={s.dash}
               />
             </svg>
-            {s.label} (balance reaches 0 in month {s.values.length - 1})
+            {s.label} (balance reaches 0 in month {startMonth + s.values.length - 1})
           </li>
         ))}
       </ul>

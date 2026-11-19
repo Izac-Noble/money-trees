@@ -52,6 +52,74 @@ export type AmortizationRequest = {
   lump_sums?: { month: number; amount: string }[];
 };
 
+export type DebtRequest = {
+  id: string;
+  name: string;
+  category: string;
+  principal: string;
+  annual_rate: string;
+  term_months: number;
+};
+
+export type TimelineRow = {
+  month: number;
+  total_payment: string;
+  total_interest: string;
+  total_ending_balance: string;
+  active_debts: number;
+};
+
+export type DebtsResponse = {
+  engine_version: string;
+  debts: ({
+    id: string;
+    name: string;
+    category: string;
+  } & Omit<AmortizationResponse, "engine_version">)[];
+  summary: {
+    total_starting_balance: string;
+    total_regular_payment: string;
+    total_interest: string;
+    total_paid: string;
+    debt_free_month: number;
+    debt_count: number;
+  };
+  timeline: TimelineRow[];
+  by_category: Record<string, { starting_balance: string; total_interest: string }>;
+};
+
+export type StrategyResponse = {
+  strategy: string;
+  priority_order: string[];
+  debt_free_month: number;
+  total_interest: string;
+  total_paid: string;
+  first_payoff_month: number;
+  payoff_order: string[];
+  interest_saved: string;
+  months_saved: number;
+  debts: { id: string; name: string; category: string; payoff_month: number; total_interest: string }[];
+  timeline: (TimelineRow & { leftover_applied: string; leftover_recipients: string[] })[];
+  baseline: {
+    total_interest: string;
+    total_paid: string;
+    debt_free_month: number;
+    timeline: { month: number; total_ending_balance: string }[];
+  };
+};
+
+export type CompareResponse = {
+  engine_version: string;
+  avalanche: StrategyResponse;
+  snowball: StrategyResponse;
+  differences: {
+    description: string;
+    total_interest: string;
+    debt_free_month: number;
+    first_payoff_month: number;
+  };
+};
+
 export type FieldError = { field: string | null; message: string };
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; errors: FieldError[] };
@@ -106,4 +174,18 @@ export function postAmortization(
   signal?: AbortSignal,
 ): Promise<ApiResult<AmortizationResponse>> {
   return postJson<AmortizationResponse>("/amortization", body, signal);
+}
+
+export function postDebts(
+  debts: DebtRequest[],
+  signal?: AbortSignal,
+): Promise<ApiResult<DebtsResponse>> {
+  return postJson<DebtsResponse>("/debts", { debts }, signal);
+}
+
+export function postCompare(
+  body: { debts: DebtRequest[]; extra_monthly: string },
+  signal?: AbortSignal,
+): Promise<ApiResult<CompareResponse>> {
+  return postJson<CompareResponse>("/strategies/compare", body, signal);
 }
