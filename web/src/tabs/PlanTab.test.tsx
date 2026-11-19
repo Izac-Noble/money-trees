@@ -39,6 +39,15 @@ function cell(row: string, column: "Avalanche" | "Snowball"): string {
 }
 
 describe("PlanTab", () => {
+  it("compares only complete debts and notes the incomplete one", async () => {
+    const fetchMock = mockApi({ "/api/strategies/compare": () => ({ json: caseM }) });
+    render(<Harness debts={[...THREE_DEBTS, { ...THREE_DEBTS[0]!, id: "x", name: "Draft", balance: "" }]} />);
+    await screen.findByRole("table");
+    const [sent] = sentBodies(fetchMock, "/api/strategies/compare") as { debts: { id: string }[] }[];
+    expect(sent?.debts.map((d) => d.id)).toEqual(["p1", "c1", "s1"]);
+    expect(screen.getByText(/1 debt is incomplete and isn't included yet\./)).toBeVisible();
+  });
+
   it("asks for debts first and links to the Debts tab", () => {
     const fetchMock = mockApi();
     render(<Harness debts={[]} />);
@@ -162,6 +171,8 @@ describe("PlanTab", () => {
     fireEvent.change(screen.getByLabelText("Extra money per month"), {
       target: { value: "12.345" },
     });
+    expect(screen.getByLabelText("Extra money per month")).not.toHaveAttribute("aria-invalid");
+    fireEvent.blur(screen.getByLabelText("Extra money per month"));
     expect(screen.getByLabelText("Extra money per month")).toHaveAccessibleDescription(
       /amount like/,
     );
@@ -171,7 +182,9 @@ describe("PlanTab", () => {
   it("points to the Debts tab when a debt is incomplete", () => {
     mockApi();
     render(<Harness debts={[{ ...THREE_DEBTS[0]!, balance: "" }]} />);
-    expect(screen.getByRole("status")).toHaveTextContent(/Some debts are missing details/);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "1 debt is incomplete and isn't included yet. Finish it on the Debts tab.",
+    );
     expect(screen.getByRole("link", { name: "Debts tab" })).toHaveAttribute("href", "#debts");
   });
 });

@@ -55,6 +55,8 @@ export default function App() {
   const [tab, setTab] = useState<TabId>(() => tabFromHash(window.location.hash));
   const [meta, setMeta] = useState<Meta | null>(null);
   const [pending, setPending] = useState<Pending>(null);
+  // Bumped on import and clear so forms remount fresh, with no leftover errors.
+  const [formGeneration, setFormGeneration] = useState(0);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -142,6 +144,8 @@ export default function App() {
       <DebtsTab
         debts={data.debts}
         onChange={(debts) => setData((d) => ({ ...d, debts }))}
+        termUnit={data.debtTermUnit}
+        onTermUnitChange={(debtTermUnit) => setData((d) => ({ ...d, debtTermUnit }))}
         currency={data.currency}
         meta={meta}
         disclaimer={disclaimer}
@@ -268,7 +272,7 @@ export default function App() {
           tabIndex={0}
           className="pt-4"
         >
-          {panels[tab]}
+          <div key={formGeneration}>{panels[tab]}</div>
         </div>
       </main>
 
@@ -283,6 +287,7 @@ export default function App() {
           onCancel={() => setPending(null)}
           onConfirm={() => {
             setData(pending.data);
+            setFormGeneration((g) => g + 1);
             setPending(null);
             setNotice({ kind: "ok", text: "Imported your data." });
           }}
@@ -299,6 +304,7 @@ export default function App() {
           onConfirm={() => {
             clearData();
             setData(emptyData());
+            setFormGeneration((g) => g + 1);
             setPending(null);
             setNotice({ kind: "ok", text: "Cleared all data." });
           }}

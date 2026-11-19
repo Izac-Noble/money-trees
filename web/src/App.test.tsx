@@ -84,8 +84,8 @@ describe("App shell", () => {
     });
     render(<App />);
     expect(screen.getByText(/isn't saving your entries/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Loan amount"), { target: { value: "1000" } });
-    expect(screen.getByLabelText("Loan amount")).toHaveValue("1000");
+    fireEvent.change(screen.getByLabelText(/^Loan amount/), { target: { value: "1000" } });
+    expect(screen.getByLabelText(/^Loan amount/)).toHaveValue("1000");
   });
 
   it("replaces data from a valid import only after confirming", async () => {
@@ -95,10 +95,10 @@ describe("App shell", () => {
     const dialog = await screen.findByRole("dialog", { name: "Replace your data?" });
     expect(dialog).toHaveTextContent("an empty loan form, 0 debts");
     expect(dialog).toHaveTextContent("loan details, 0 debts");
-    expect(screen.getByLabelText("Loan amount")).toHaveValue("");
+    expect(screen.getByLabelText(/^Loan amount/)).toHaveValue("");
 
     fireEvent.click(screen.getByRole("button", { name: "Replace my data" }));
-    expect(screen.getByLabelText("Loan amount")).toHaveValue("5000");
+    expect(screen.getByLabelText(/^Loan amount/)).toHaveValue("5000");
     expect(loadData().loan.amount).toBe("5000");
   });
 
@@ -109,7 +109,7 @@ describe("App shell", () => {
     await screen.findByRole("dialog");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Loan amount")).toHaveValue("");
+    expect(screen.getByLabelText(/^Loan amount/)).toHaveValue("");
   });
 
   it.each([
@@ -125,7 +125,7 @@ describe("App shell", () => {
       expect(screen.getByText(/isn't a Money Trees export, so nothing was changed/)).toBeVisible(),
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Loan amount")).toHaveValue("5000");
+    expect(screen.getByLabelText(/^Loan amount/)).toHaveValue("5000");
     expect(loadData().loan.amount).toBe("5000");
   });
 
@@ -136,9 +136,9 @@ describe("App shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear all data" }));
     const dialog = screen.getByRole("dialog", { name: "Clear all data?" });
     expect(dialog).toHaveTextContent("can't be undone");
-    expect(screen.getByLabelText("Loan amount")).toHaveValue("5000");
+    expect(screen.getByLabelText(/^Loan amount/)).toHaveValue("5000");
     fireEvent.click(screen.getAllByRole("button", { name: "Clear all data" })[1]!);
-    expect(screen.getByLabelText("Loan amount")).toHaveValue("");
+    expect(screen.getByLabelText(/^Loan amount/)).toHaveValue("");
     expect(loadData()).toEqual(emptyData());
   });
 
