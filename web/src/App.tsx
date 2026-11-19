@@ -13,6 +13,7 @@ import {
 } from "./lib/storage";
 import { DebtsTab } from "./tabs/DebtsTab";
 import { LoanTab } from "./tabs/LoanTab";
+import { PlanTab } from "./tabs/PlanTab";
 
 /** Shown until /api/meta answers, so the footer is never empty. Same text the API serves. */
 export const FALLBACK_DISCLAIMER = "Estimates for learning and planning, not financial advice.";
@@ -147,7 +148,13 @@ export default function App() {
       />
     ),
     plan: (
-      <p className="text-sm text-stone-700">The Payoff Plan tab is coming in the next update.</p>
+      <PlanTab
+        debts={data.debts}
+        plan={data.plan}
+        onChange={(plan) => setData((d) => ({ ...d, plan }))}
+        currency={data.currency}
+        disclaimer={disclaimer}
+      />
     ),
   };
 

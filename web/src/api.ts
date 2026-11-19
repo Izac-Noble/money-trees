@@ -88,6 +88,38 @@ export type DebtsResponse = {
   by_category: Record<string, { starting_balance: string; total_interest: string }>;
 };
 
+export type StrategyResponse = {
+  strategy: string;
+  priority_order: string[];
+  debt_free_month: number;
+  total_interest: string;
+  total_paid: string;
+  first_payoff_month: number;
+  payoff_order: string[];
+  interest_saved: string;
+  months_saved: number;
+  debts: { id: string; name: string; category: string; payoff_month: number; total_interest: string }[];
+  timeline: (TimelineRow & { leftover_applied: string; leftover_recipients: string[] })[];
+  baseline: {
+    total_interest: string;
+    total_paid: string;
+    debt_free_month: number;
+    timeline: { month: number; total_ending_balance: string }[];
+  };
+};
+
+export type CompareResponse = {
+  engine_version: string;
+  avalanche: StrategyResponse;
+  snowball: StrategyResponse;
+  differences: {
+    description: string;
+    total_interest: string;
+    debt_free_month: number;
+    first_payoff_month: number;
+  };
+};
+
 export type FieldError = { field: string | null; message: string };
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; errors: FieldError[] };
@@ -149,4 +181,11 @@ export function postDebts(
   signal?: AbortSignal,
 ): Promise<ApiResult<DebtsResponse>> {
   return postJson<DebtsResponse>("/debts", { debts }, signal);
+}
+
+export function postCompare(
+  body: { debts: DebtRequest[]; extra_monthly: string },
+  signal?: AbortSignal,
+): Promise<ApiResult<CompareResponse>> {
+  return postJson<CompareResponse>("/strategies/compare", body, signal);
 }
