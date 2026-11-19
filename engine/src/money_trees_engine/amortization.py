@@ -24,6 +24,8 @@ __all__ = [
     "AmortizationAssumptions",
     "AmortizationResult",
     "AmortizationSummary",
+    "LoanInputError",
+    "LoanInputTypeError",
     "LumpSum",
     "MAX_TERM_MONTHS",
     "ScheduleRow",
@@ -37,6 +39,22 @@ _ZERO = Decimal("0.00")
 _MONTHS_PER_YEAR = 12
 # Plenty of precision for (1 + r) ** -600 before the single rounding to cents.
 _PRECISION = 50
+
+
+class LoanInputError(ValueError):
+    """Invalid loan input. ``field`` names the offending input (e.g. ``"principal"``)."""
+
+    def __init__(self, field: str, message: str) -> None:
+        super().__init__(message)
+        self.field = field
+
+
+class LoanInputTypeError(TypeError):
+    """Loan input of the wrong type (e.g. a float for money). ``field`` names the input."""
+
+    def __init__(self, field: str, message: str) -> None:
+        super().__init__(message)
+        self.field = field
 
 
 def _to_cents(value: Decimal) -> Decimal:
@@ -94,39 +112,46 @@ class AmortizationResult:
 
 def _validate_loan(principal: Decimal, annual_rate: Decimal, term_months: int) -> None:
     if not isinstance(principal, Decimal):
-        raise TypeError("principal must be a Decimal")
+        raise LoanInputTypeError("principal", "principal must be a Decimal")
     if not isinstance(annual_rate, Decimal):
-        raise TypeError("annual_rate must be a Decimal")
+        raise LoanInputTypeError("annual_rate", "annual_rate must be a Decimal")
     if isinstance(term_months, bool) or not isinstance(term_months, int):
-        raise TypeError("term_months must be an int")
+        raise LoanInputTypeError("term_months", "term_months must be an int")
     if not principal.is_finite() or principal <= 0:
-        raise ValueError(f"principal must be greater than 0, got {principal}")
+        raise LoanInputError("principal", f"principal must be greater than 0, got {principal}")
     if not annual_rate.is_finite() or annual_rate < 0 or annual_rate >= 1:
-        raise ValueError(
-            f"annual_rate must be a fraction at least 0 and below 1, got {annual_rate}"
+        raise LoanInputError(
+            "annual_rate",
+            f"annual_rate must be a fraction at least 0 and below 1, got {annual_rate}",
         )
     if term_months < 1 or term_months > MAX_TERM_MONTHS:
-        raise ValueError(f"term_months must be between 1 and {MAX_TERM_MONTHS}, got {term_months}")
+        raise LoanInputError(
+            "term_months", f"term_months must be between 1 and {MAX_TERM_MONTHS}, got {term_months}"
+        )
 
 
 def _validate_extras(
     term_months: int, extra_monthly: Decimal, lump_sums: Sequence[LumpSum]
 ) -> None:
     if not isinstance(extra_monthly, Decimal):
-        raise TypeError("extra_monthly must be a Decimal")
+        raise LoanInputTypeError("extra_monthly", "extra_monthly must be a Decimal")
     if not extra_monthly.is_finite() or extra_monthly < 0:
-        raise ValueError(f"extra_monthly must be at least 0, got {extra_monthly}")
+        raise LoanInputError(
+            "extra_monthly", f"extra_monthly must be at least 0, got {extra_monthly}"
+        )
     for lump in lump_sums:
         if isinstance(lump.month, bool) or not isinstance(lump.month, int):
-            raise TypeError("lump sum month must be an int")
+            raise LoanInputTypeError("lump_sums", "lump sum month must be an int")
         if not isinstance(lump.amount, Decimal):
-            raise TypeError("lump sum amount must be a Decimal")
+            raise LoanInputTypeError("lump_sums", "lump sum amount must be a Decimal")
         if lump.month < 1 or lump.month > term_months:
-            raise ValueError(
-                f"lump sum month must be between 1 and {term_months}, got {lump.month}"
+            raise LoanInputError(
+                "lump_sums", f"lump sum month must be between 1 and {term_months}, got {lump.month}"
             )
         if not lump.amount.is_finite() or lump.amount <= 0:
-            raise ValueError(f"lump sum amount must be greater than 0, got {lump.amount}")
+            raise LoanInputError(
+                "lump_sums", f"lump sum amount must be greater than 0, got {lump.amount}"
+            )
 
 
 def regular_payment(principal: Decimal, annual_rate: Decimal, term_months: int) -> Decimal:
