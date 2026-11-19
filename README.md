@@ -109,7 +109,7 @@ project serves both web and API, so each variable is shared by both services.
 | Variable | Purpose | Preview (staging + PRs) | Production |
 | --- | --- | --- | --- |
 | `APP_ENV` | Names the environment. The API returns it from `GET /api/health`. The web build adds a noindex robots tag unless it is exactly `production`. Defaults to `development` when unset. | `staging` | `production` |
-| `API_PROXY_TARGET` | Local dev only: where `npm run dev` proxies `/api`. Defaults to `http://localhost:8000`. Not set on Vercel. | — | — |
+| `API_PROXY_TARGET` | Local dev only: where `npm run dev` proxies `/api`. Defaults to `http://127.0.0.1:8000`. Not set on Vercel. | — | — |
 
 `VITE_API_URL` and `ALLOWED_ORIGINS` are no longer used. Delete them from any
 Vercel or Render settings where they were added.

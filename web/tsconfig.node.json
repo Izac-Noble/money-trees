@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["vite.config.ts", "eslint.config.js", "robots.ts", "robots.test.ts"]
+  "include": ["vite.config.ts", "eslint.config.js", "robots.ts", "robots.test.ts", "ui-text.test.ts"]
 }
