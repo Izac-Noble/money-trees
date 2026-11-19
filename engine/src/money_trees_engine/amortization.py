@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, localcontext
+from enum import StrEnum
 
 __all__ = [
     "AmortizationAssumptions",
@@ -27,9 +28,12 @@ __all__ = [
     "LoanInputError",
     "LoanInputTypeError",
     "LumpSum",
+    "PaymentMode",
+    "PaymentTooSmallError",
     "MAX_TERM_MONTHS",
     "ScheduleRow",
     "amortize",
+    "amortize_payment",
     "regular_payment",
 ]
 
@@ -55,6 +59,26 @@ class LoanInputTypeError(TypeError):
     def __init__(self, field: str, message: str) -> None:
         super().__init__(message)
         self.field = field
+
+
+class PaymentTooSmallError(LoanInputError):
+    """A fixed payment that doesn't cover the first month's interest (Spec 3b)."""
+
+    def __init__(self, min_interest: Decimal) -> None:
+        super().__init__(
+            "monthly_payment",
+            "This payment doesn't cover the monthly interest, so the balance would never go "
+            f"down. The first month's interest is {min_interest}.",
+        )
+        self.min_interest = min_interest
+
+
+class PaymentMode(StrEnum):
+    FIXED_TERM = "fixed_term"  # balance, rate, time left -> payment (Spec 1)
+    FIXED_PAYMENT = "fixed_payment"  # balance, rate, payment -> time to pay off (Spec 3b)
+
+
+TOO_LONG_MESSAGE = "At this payment, this would take more than 50 years to pay off."
 
 
 def _to_cents(value: Decimal) -> Decimal:
@@ -87,9 +111,11 @@ class AmortizationAssumptions:
     principal: Decimal
     annual_rate: Decimal
     monthly_rate: Decimal
-    term_months: int
+    term_months: int | None  # None in fixed_payment mode
     extra_monthly: Decimal
     lump_sums: tuple[LumpSum, ...]
+    payment_mode: PaymentMode = PaymentMode.FIXED_TERM
+    monthly_payment: Decimal | None = None  # set in fixed_payment mode
 
 
 @dataclass(frozen=True)
@@ -110,13 +136,11 @@ class AmortizationResult:
     assumptions: AmortizationAssumptions
 
 
-def _validate_loan(principal: Decimal, annual_rate: Decimal, term_months: int) -> None:
+def _validate_balance_and_rate(principal: Decimal, annual_rate: Decimal) -> None:
     if not isinstance(principal, Decimal):
         raise LoanInputTypeError("principal", "principal must be a Decimal")
     if not isinstance(annual_rate, Decimal):
         raise LoanInputTypeError("annual_rate", "annual_rate must be a Decimal")
-    if isinstance(term_months, bool) or not isinstance(term_months, int):
-        raise LoanInputTypeError("term_months", "term_months must be an int")
     if not principal.is_finite() or principal <= 0:
         raise LoanInputError("principal", f"principal must be greater than 0, got {principal}")
     if not annual_rate.is_finite() or annual_rate < 0 or annual_rate >= 1:
@@ -124,6 +148,12 @@ def _validate_loan(principal: Decimal, annual_rate: Decimal, term_months: int) -
             "annual_rate",
             f"annual_rate must be a fraction at least 0 and below 1, got {annual_rate}",
         )
+
+
+def _validate_loan(principal: Decimal, annual_rate: Decimal, term_months: int) -> None:
+    if isinstance(term_months, bool) or not isinstance(term_months, int):
+        raise LoanInputTypeError("term_months", "term_months must be an int")
+    _validate_balance_and_rate(principal, annual_rate)
     if term_months < 1 or term_months > MAX_TERM_MONTHS:
         raise LoanInputError(
             "term_months", f"term_months must be between 1 and {MAX_TERM_MONTHS}, got {term_months}"
@@ -169,16 +199,23 @@ def regular_payment(principal: Decimal, annual_rate: Decimal, term_months: int) 
 def _build_schedule(
     principal: Decimal,
     monthly_rate: Decimal,
-    term_months: int,
+    term_months: int | None,
     payment: Decimal,
     extra_monthly: Decimal,
     lump_by_month: dict[int, Decimal],
 ) -> tuple[ScheduleRow, ...]:
+    """The schedule month by month.
+
+    With a term, the last month pays off whatever is left. Without one (fixed_payment),
+    the schedule stops at payoff or after MAX_TERM_MONTHS rows, whichever is first;
+    callers check that the last row ends at 0.
+    """
     rows: list[ScheduleRow] = []
     balance = _to_cents(principal)
+    last_month = term_months if term_months is not None else MAX_TERM_MONTHS
     with localcontext() as ctx:
         ctx.prec = _PRECISION
-        for month in range(1, term_months + 1):
+        for month in range(1, last_month + 1):
             interest = _to_cents(balance * monthly_rate)
             scheduled = payment - interest
             extra = _to_cents(extra_monthly + lump_by_month.get(month, _ZERO))
@@ -275,5 +312,89 @@ def amortize(
             term_months=term_months,
             extra_monthly=extra_monthly,
             lump_sums=lumps,
+        ),
+    )
+
+
+def amortize_payment(
+    principal: Decimal,
+    annual_rate: Decimal,
+    monthly_payment: Decimal,
+    extra_monthly: Decimal = _ZERO,
+    lump_sums: Iterable[LumpSum] = (),
+) -> AmortizationResult:
+    """Spec 3b fixed_payment mode: a steady monthly payment, and how long it takes.
+
+    Each month works as in :func:`amortize`; the debt ends in the first month where
+    scheduled plus extra principal meets the balance, and that payment is the balance
+    plus the month's interest. There is no term to absorb rounding cents, so they
+    become a small last payment.
+
+    Raises :class:`PaymentTooSmallError` if the payment doesn't exceed the first
+    month's interest, and :class:`LoanInputError` if payoff at this payment (without
+    extras) would take more than ``MAX_TERM_MONTHS`` months.
+    """
+    lumps = tuple(lump_sums)
+    _validate_balance_and_rate(principal, annual_rate)
+    if not isinstance(monthly_payment, Decimal):
+        raise LoanInputTypeError("monthly_payment", "monthly_payment must be a Decimal")
+    if not monthly_payment.is_finite() or monthly_payment <= 0:
+        raise LoanInputError(
+            "monthly_payment", f"monthly_payment must be greater than 0, got {monthly_payment}"
+        )
+    _validate_extras(MAX_TERM_MONTHS, extra_monthly, lumps)
+
+    with localcontext() as ctx:
+        ctx.prec = _PRECISION
+        monthly_rate = annual_rate / _MONTHS_PER_YEAR
+        first_interest = _to_cents(_to_cents(principal) * monthly_rate)
+    if monthly_payment <= first_interest:
+        raise PaymentTooSmallError(first_interest)
+
+    # The limit is about the payment itself, so it's checked without extras.
+    baseline = _build_schedule(principal, monthly_rate, None, monthly_payment, _ZERO, {})
+    if baseline[-1].ending_balance != 0:
+        raise LoanInputError("monthly_payment", TOO_LONG_MESSAGE)
+
+    lump_by_month: dict[int, Decimal] = {}
+    for lump in lumps:
+        lump_by_month[lump.month] = lump_by_month.get(lump.month, _ZERO) + lump.amount
+
+    has_extras = extra_monthly > 0 or bool(lumps)
+    schedule = (
+        _build_schedule(
+            principal, monthly_rate, None, monthly_payment, extra_monthly, lump_by_month
+        )
+        if has_extras
+        else baseline
+    )
+    total_interest, total_paid = _totals(schedule)
+
+    interest_saved: Decimal | None = None
+    months_saved: int | None = None
+    if has_extras:
+        baseline_interest, _ = _totals(baseline)
+        interest_saved = baseline_interest - total_interest
+        months_saved = len(baseline) - len(schedule)
+
+    return AmortizationResult(
+        summary=AmortizationSummary(
+            regular_payment=monthly_payment,
+            payoff_month=len(schedule),
+            total_interest=total_interest,
+            total_paid=total_paid,
+            interest_saved=interest_saved,
+            months_saved=months_saved,
+        ),
+        schedule=schedule,
+        assumptions=AmortizationAssumptions(
+            principal=principal,
+            annual_rate=annual_rate,
+            monthly_rate=monthly_rate,
+            term_months=None,
+            extra_monthly=extra_monthly,
+            lump_sums=lumps,
+            payment_mode=PaymentMode.FIXED_PAYMENT,
+            monthly_payment=monthly_payment,
         ),
     )

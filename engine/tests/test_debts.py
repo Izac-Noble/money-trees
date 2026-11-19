@@ -186,12 +186,17 @@ def test_suggested_terms() -> None:
         DebtCategory.AUTO: 60,
         DebtCategory.STUDENT: 120,
         DebtCategory.PERSONAL: 36,
+        DebtCategory.CREDIT_CARD: None,
+        DebtCategory.MEDICAL: None,
+        DebtCategory.FAMILY_FRIEND: None,
+        DebtCategory.TAX: None,
         DebtCategory.OTHER: None,
     }
 
 
-def test_credit_card_is_not_a_category() -> None:
-    assert "credit_card" not in {c.value for c in DebtCategory}
+def test_car_loan_is_not_a_category() -> None:
+    # Spec 3b replaced "credit_card is rejected" with an id that isn't in the list.
+    assert "car_loan" not in {c.value for c in DebtCategory}
 
 
 # --- Validation ------------------------------------------------------------------------
@@ -220,7 +225,7 @@ def test_rejects_blank_id() -> None:
     assert info.value.field == "id"
 
 
-@pytest.mark.parametrize("category", ["credit_card", "boat", "", "Auto"])
+@pytest.mark.parametrize("category", ["car_loan", "boat", "", "Auto"])
 def test_rejects_unknown_category(category: str) -> None:
     with pytest.raises(DebtInputError) as info:
         analyze_debts([PERSONAL, replace(CAR, category=category)])

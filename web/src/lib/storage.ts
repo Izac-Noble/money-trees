@@ -3,14 +3,14 @@
  * version. Every storage access is wrapped in try/catch: with storage blocked or
  * full, the app keeps working and simply doesn't remember anything.
  */
-import { isCurrency, type Currency } from "./format";
 
 // The key stays the same across schema versions so saved data is always found;
-// the `version` inside says which shape it has. Version 1 files are upgraded on read.
+// the `version` inside says which shape it has. Older versions are upgraded on read.
 export const STORAGE_KEY = "money-trees:v1";
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export type TermUnit = "years" | "months";
+export type PaymentMode = "fixed_term" | "fixed_payment";
 
 export type LumpSumInput = { key: string; month: string; amount: string };
 
@@ -29,19 +29,24 @@ export type DebtInput = {
   category: string;
   balance: string;
   ratePercent: string;
-  /** Time left to pay, in `termUnit`. */
+  /** "Enter by": time left (fixed_term) or monthly payment (fixed_payment). */
+  paymentMode: PaymentMode;
+  /** True once the user touched the toggle or typed a time or payment. */
+  modeChosen: boolean;
+  /** Time left to pay, in `termUnit`. Kept when switching to monthly payment. */
   term: string;
   termUnit: TermUnit;
+  /** Kept when switching to time left. */
+  monthlyPayment: string;
 };
 
 export type PlanInput = { extra: string };
 
 export type AppData = {
-  currency: Currency;
   loan: LoanInput;
   debts: DebtInput[];
-  /** The unit last picked on the Debts tab, used for new debts. */
-  debtTermUnit: TermUnit;
+  /** The time unit picked last, anywhere in the app. New time fields start on it. */
+  timeUnit: TermUnit;
   plan: PlanInput;
 };
 
@@ -49,11 +54,25 @@ export type SavedFile = { version: typeof SCHEMA_VERSION; data: AppData };
 
 export function emptyData(): AppData {
   return {
-    currency: "USD",
     loan: { amount: "", ratePercent: "", term: "", termUnit: "years", extra: "", lumpSums: [] },
     debts: [],
-    debtTermUnit: "years",
+    timeUnit: "years",
     plan: { extra: "" },
+  };
+}
+
+export function newDebt(id: string, termUnit: TermUnit): DebtInput {
+  return {
+    id,
+    name: "",
+    category: "",
+    balance: "",
+    ratePercent: "",
+    paymentMode: "fixed_term",
+    modeChosen: false,
+    term: "",
+    termUnit,
+    monthlyPayment: "",
   };
 }
 
@@ -67,9 +86,17 @@ function strings(value: unknown, keys: readonly string[]): value is Obj {
   return isObj(value) && keys.every((k) => typeof value[k] === "string");
 }
 
+function isUnit(value: unknown): value is TermUnit {
+  return value === "years" || value === "months";
+}
+
+function isMode(value: unknown): value is PaymentMode {
+  return value === "fixed_term" || value === "fixed_payment";
+}
+
 function parseLoan(value: unknown): LoanInput | null {
-  if (!strings(value, ["amount", "ratePercent", "term", "termUnit", "extra"])) return null;
-  if (value.termUnit !== "years" && value.termUnit !== "months") return null;
+  if (!strings(value, ["amount", "ratePercent", "term", "extra"])) return null;
+  if (!isUnit(value.termUnit)) return null;
   if (!Array.isArray(value.lumpSums)) return null;
   const lumpSums: LumpSumInput[] = [];
   for (const item of value.lumpSums) {
@@ -86,37 +113,36 @@ function parseLoan(value: unknown): LoanInput | null {
   };
 }
 
-function isUnit(value: unknown): value is TermUnit {
-  return value === "years" || value === "months";
-}
-
 function parseDebts(value: unknown, version: number): DebtInput[] | null {
   if (!Array.isArray(value)) return null;
   const debts: DebtInput[] = [];
-  const base = ["id", "name", "category", "balance", "ratePercent"] as const;
   for (const item of value) {
-    if (!strings(item, base)) return null;
-    let term: string;
-    let termUnit: TermUnit;
+    if (!strings(item, ["id", "name", "category", "balance", "ratePercent"])) return null;
+    const debt = newDebt(String(item.id), "years");
+    debt.name = String(item.name);
+    debt.category = String(item.category);
+    debt.balance = String(item.balance);
+    debt.ratePercent = String(item.ratePercent);
     if (version === 1) {
       // Version 1 stored months only.
       if (typeof item.termMonths !== "string") return null;
-      term = item.termMonths;
-      termUnit = "months";
+      debt.term = item.termMonths;
+      debt.termUnit = "months";
     } else {
       if (typeof item.term !== "string" || !isUnit(item.termUnit)) return null;
-      term = item.term;
-      termUnit = item.termUnit;
+      debt.term = item.term;
+      debt.termUnit = item.termUnit;
     }
-    debts.push({
-      id: String(item.id),
-      name: String(item.name),
-      category: String(item.category),
-      balance: String(item.balance),
-      ratePercent: String(item.ratePercent),
-      term,
-      termUnit,
-    });
+    // Older versions only had time left, so a typed one counts as a choice.
+    debt.modeChosen = debt.term !== "";
+    if (version >= 3) {
+      if (!isMode(item.paymentMode) || typeof item.monthlyPayment !== "string") return null;
+      if (typeof item.modeChosen !== "boolean") return null;
+      debt.paymentMode = item.paymentMode;
+      debt.monthlyPayment = item.monthlyPayment;
+      debt.modeChosen = item.modeChosen;
+    }
+    debts.push(debt);
   }
   return debts;
 }
@@ -125,24 +151,19 @@ function parseDebts(value: unknown, version: number): DebtInput[] | null {
 export function parseSaved(value: unknown): AppData | null {
   if (!isObj(value) || !isObj(value.data)) return null;
   const version = value.version;
-  if (version !== 1 && version !== SCHEMA_VERSION) return null;
+  if (version !== 1 && version !== 2 && version !== SCHEMA_VERSION) return null;
   const data = value.data;
-  if (!isCurrency(data.currency)) return null;
   const loan = parseLoan(data.loan);
   const debts = parseDebts(data.debts, version);
   if (!loan || !debts || !strings(data.plan, ["extra"])) return null;
-  let debtTermUnit: TermUnit = "years";
+  // Versions 1 and 2 also had a currency setting; USD is the only currency now.
+  let timeUnit: TermUnit = "years";
+  if (version === 2 && isUnit(data.debtTermUnit)) timeUnit = data.debtTermUnit;
   if (version === SCHEMA_VERSION) {
-    if (!isUnit(data.debtTermUnit)) return null;
-    debtTermUnit = data.debtTermUnit;
+    if (!isUnit(data.timeUnit)) return null;
+    timeUnit = data.timeUnit;
   }
-  return {
-    currency: data.currency,
-    loan,
-    debts,
-    debtTermUnit,
-    plan: { extra: String(data.plan.extra) },
-  };
+  return { loan, debts, timeUnit, plan: { extra: String(data.plan.extra) } };
 }
 
 export function toSaved(data: AppData): SavedFile {

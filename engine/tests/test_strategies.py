@@ -260,5 +260,5 @@ def test_rejects_unknown_strategy(name: str) -> None:
 
 def test_spec_2_rules_still_apply() -> None:
     with pytest.raises(DebtInputError) as info:
-        run_strategy([replace(CAR, category="credit_card")], D("300"), "avalanche")
+        run_strategy([replace(CAR, category="car_loan")], D("300"), "avalanche")
     assert (info.value.debt_id, info.value.field) == ("c1", "category")

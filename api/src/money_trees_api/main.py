@@ -28,16 +28,22 @@ from money_trees_api.parsing import FieldError, InvalidInput
 from money_trees_api.settings import Settings
 from money_trees_engine.amortization import (
     MAX_TERM_MONTHS,
+    TOO_LONG_MESSAGE,
     LoanInputError,
     LoanInputTypeError,
+    PaymentMode,
+    PaymentTooSmallError,
     amortize,
+    amortize_payment,
 )
 from money_trees_engine.debts import (
+    CATEGORIES,
     MAX_DEBTS,
     MAX_NAME_LENGTH,
-    SUGGESTED_TERM_MONTHS,
+    Debt,
     DebtInputError,
     analyze_debts,
+    notes_for_category,
 )
 from money_trees_engine.strategies import Strategy, compare_strategies, run_strategy
 
@@ -58,7 +64,9 @@ class _HTTPProblem(Exception):
 def _error_response(status: int, errors: list[FieldError]) -> JSONResponse:
     return JSONResponse(
         status_code=status,
-        content={"errors": [{"field": e.field, "message": e.message} for e in errors]},
+        content={
+            "errors": [{"field": e.field, "message": e.message, **dict(e.details)} for e in errors]
+        },
     )
 
 
@@ -82,16 +90,60 @@ async def _read_json(request: Request) -> object:
         raise _HTTPProblem(400, [FieldError(None, "Request body is not valid JSON.")]) from None
 
 
+TOO_SMALL_MESSAGE = (
+    "This payment doesn't cover the monthly interest, so the balance would never go down."
+)
+
+
+def _payment_error(exc: LoanInputError, field: str) -> FieldError | None:
+    """Spec 3b payment errors, which only the engine can detect, in plain English."""
+    if isinstance(exc, PaymentTooSmallError):
+        return FieldError(
+            field, TOO_SMALL_MESSAGE, (("min_interest", serialize.money(exc.min_interest)),)
+        )
+    if exc.field == "monthly_payment" and str(exc) == TOO_LONG_MESSAGE:
+        return FieldError(field, TOO_LONG_MESSAGE)
+    return None
+
+
 def _engine_error(exc: Exception, debt_ids: list[str] | None = None) -> InvalidInput:
-    """Backstop: report an engine validation error with an API field path."""
+    """Report an engine validation error with an API field path."""
     if isinstance(exc, DebtInputError):
         field = exc.field
         if exc.debt_id is not None and debt_ids and exc.debt_id in debt_ids:
             field = f"debts[{debt_ids.index(exc.debt_id)}].{exc.field}"
+        cause = exc.__cause__
+        if isinstance(cause, LoanInputError):
+            known = _payment_error(cause, field)
+            if known:
+                return InvalidInput([known])
         return InvalidInput([FieldError(field, "This value isn't valid.")])
+    if isinstance(exc, LoanInputError):
+        known = _payment_error(exc, exc.field)
+        if known:
+            return InvalidInput([known])
     if isinstance(exc, LoanInputError | LoanInputTypeError):
         return InvalidInput([FieldError(exc.field, "This value isn't valid.")])
     raise exc
+
+
+def _check_payments(debts: list[Debt]) -> None:
+    """Find every fixed_payment debt whose payment can't work, not just the first.
+
+    Each check is an engine call; the API itself does no math.
+    """
+    errors: list[FieldError] = []
+    for i, debt in enumerate(debts):
+        if debt.payment_mode != PaymentMode.FIXED_PAYMENT or debt.monthly_payment is None:
+            continue
+        try:
+            amortize_payment(debt.principal, debt.annual_rate, debt.monthly_payment)
+        except LoanInputError as exc:
+            known = _payment_error(exc, f"debts[{i}].monthly_payment")
+            if known:
+                errors.append(known)
+    if errors:
+        raise InvalidInput(errors)
 
 
 def _with_version(payload: dict[str, Any]) -> dict[str, Any]:
@@ -148,9 +200,15 @@ def create_app(settings: Settings) -> FastAPI:
             "engine_version": money_trees_engine.__version__,
             "disclaimer": DISCLAIMER,
             "categories": [
-                {"value": c.value, "suggested_term_months": term}
-                for c, term in SUGGESTED_TERM_MONTHS.items()
+                {
+                    "value": c.value,
+                    "label": info.label,
+                    "default_payment_mode": info.default_mode.value,
+                    "suggested_term_months": info.suggested_term_months,
+                }
+                for c, info in CATEGORIES.items()
             ],
+            "payment_modes": [m.value for m in PaymentMode],
             "strategies": [s.value for s in Strategy],
             "limits": {
                 "max_debts": MAX_DEBTS,
@@ -167,20 +225,33 @@ def create_app(settings: Settings) -> FastAPI:
     async def amortization(request: Request) -> dict[str, Any]:
         loan = parsing.parse_amortization(await _read_json(request))
         try:
-            result = amortize(
-                loan.principal,
-                loan.annual_rate,
-                loan.term_months,
-                loan.extra_monthly,
-                loan.lump_sums,
-            )
+            if loan.payment_mode is PaymentMode.FIXED_TERM:
+                assert loan.term_months is not None
+                result = amortize(
+                    loan.principal,
+                    loan.annual_rate,
+                    loan.term_months,
+                    loan.extra_monthly,
+                    loan.lump_sums,
+                )
+            else:
+                assert loan.monthly_payment is not None
+                result = amortize_payment(
+                    loan.principal,
+                    loan.annual_rate,
+                    loan.monthly_payment,
+                    loan.extra_monthly,
+                    loan.lump_sums,
+                )
         except (LoanInputError, LoanInputTypeError) as exc:
             raise _engine_error(exc) from None
-        return _with_version(serialize.amortization(result))
+        notes = notes_for_category(loan.category)
+        return _with_version(serialize.amortization(result, notes))
 
     @router.post("/debts")
     async def debts(request: Request) -> dict[str, Any]:
         debt_list = parsing.parse_debts(await _read_json(request))
+        _check_payments(debt_list)
         try:
             result = analyze_debts(debt_list)
         except DebtInputError as exc:
@@ -190,6 +261,7 @@ def create_app(settings: Settings) -> FastAPI:
     @router.post("/strategies")
     async def strategies(request: Request) -> dict[str, Any]:
         data = parsing.parse_strategy(await _read_json(request))
+        _check_payments(data.debts)
         try:
             result = run_strategy(data.debts, data.extra_monthly, data.strategy, data.custom_order)
         except DebtInputError as exc:
@@ -199,6 +271,7 @@ def create_app(settings: Settings) -> FastAPI:
     @router.post("/strategies/compare")
     async def strategies_compare(request: Request) -> dict[str, Any]:
         data = parsing.parse_compare(await _read_json(request))
+        _check_payments(data.debts)
         try:
             result = compare_strategies(data.debts, data.extra_monthly)
         except DebtInputError as exc:

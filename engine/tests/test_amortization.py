@@ -32,6 +32,7 @@ def assert_invariants(result: AmortizationResult) -> None:
     schedule = result.schedule
     principal = result.assumptions.principal
     assert schedule, "schedule must have at least one row"
+    assert result.assumptions.term_months is not None
     assert len(schedule) <= result.assumptions.term_months
     assert [row.month for row in schedule] == list(range(1, len(schedule) + 1))
     assert schedule[0].starting_balance == principal

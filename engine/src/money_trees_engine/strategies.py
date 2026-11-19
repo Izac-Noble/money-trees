@@ -77,6 +77,7 @@ class DebtPayoff:
     total_paid: Decimal
     # Spec 1 row shape; extra_principal is the leftover this debt received.
     schedule: tuple[ScheduleRow, ...]
+    notes: tuple[str, ...] = ()  # limits the UI must show (credit cards)
 
 
 @dataclass(frozen=True)
@@ -202,7 +203,8 @@ def _simulate(
             start = s.balance
             interest = _to_cents(start * s.monthly_rate)
             scheduled = s.payment - interest
-            if month >= s.debt.term_months or scheduled >= start:
+            at_term_end = s.debt.term_months is not None and month >= s.debt.term_months
+            if at_term_end or scheduled >= start:
                 scheduled = start  # final month: exact payoff amount
             required_total += scheduled + interest
             pending[s.debt.id] = (start, interest, scheduled, start - scheduled)
@@ -297,6 +299,7 @@ def run_strategy(
             total_interest=sum((row.interest for row in s.rows), _ZERO),
             total_paid=sum((row.total_payment for row in s.rows), _ZERO),
             schedule=tuple(s.rows),
+            notes=by_id[s.debt.id].notes,
         )
         for s in states
     )
